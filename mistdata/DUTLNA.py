@@ -6,6 +6,9 @@ from .utils import add_sort_time_pair, hdfdt2dtlist, dtlist2strlist, ds2np
 
 
 class DUTLNA:
+    """
+    Class containing data for LNA as a device under test.
+    """
     def __init__(
             self,
             therm=Thermistors(),
@@ -35,6 +38,12 @@ class DUTLNA:
         self.s11_lna_time = lna_time
 
     def write_self_to_file(self, file: h5py.File):
+        """
+        Write the attributes of the DUTLNA object to an HDF5 file.
+
+        :param file: The HDF5 file to write to.
+        :return: None
+        """
         grp = file.create_group("dutlna")
 
         grp.create_dataset("s11_freq", data=self.s11_freq)
@@ -54,6 +63,13 @@ class DUTLNA:
 
     @classmethod
     def read_self_from_file(cls, file: h5py.File):
+        """
+        Read DUTLNA object from an HDF5 file.
+
+        :param cls: The DUTLNA class.
+        :param file: The HDF5 file object.
+        :return: The DUTLNA object.
+        """
         obj = cls()
         grp = file['dutlna']
         obj.s11_freq = ds2np(grp.get("s11_freq"))

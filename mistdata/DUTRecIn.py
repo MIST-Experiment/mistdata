@@ -8,6 +8,9 @@ from .utils import add_sort_time_pair, hdfdt2dtlist, dtlist2strlist, ds2np
 
 
 class DUTRecIn:
+    """
+    Class containing data for receiver input as a device under test.
+    """
     def __init__(
             self,
             therm=Thermistors(),
@@ -45,6 +48,11 @@ class DUTRecIn:
         self.s11_noise_source_time = noise_source_time
 
     def write_self_to_file(self, file: h5py.File):
+        """
+        Write self to a HDF5 file.
+
+        :param file: an open HDF5 file handle
+        """
         grp = file.create_group("dutrecin")
 
         grp.create_dataset("s11_freq", data=self.s11_freq)
@@ -68,6 +76,10 @@ class DUTRecIn:
 
     @classmethod
     def read_self_from_file(cls, file: h5py.File):
+        """
+        :param file: The h5py.File object representing the HDF5 file containing the DUTRecIn data.
+        :return: An instance of the DUTRecIn class with data read from the file.
+        """
         obj = cls()
         grp = file['dutrecin']
         obj.s11_freq = ds2np(grp.get("s11_freq"))
