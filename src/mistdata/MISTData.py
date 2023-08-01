@@ -110,25 +110,13 @@ class MISTData:
             obj = cls(dut_recin=dutrecin, dut_lna=dutlna, spec=spec)
         return obj
 
-    @staticmethod
-    def from_list(obj_list) -> "MISTData":
-        """
-        Construct a MISTData object from a list of objects.
-
-        :param obj_list: A list of objects to be combined into a MISTData object.
-        :return: A MISTData object containing the combined data from the input objects.
-        """
-        base = obj_list[0]
-        for i in range(1, len(obj_list)):
-            base += obj_list[i]
-        return base
 
     @classmethod
-    def read_raw_many(cls, files: List[str], nproc=None):
+    def read_raw(cls, file: str | List[str], nproc=1):
         """
         Reads multiple raw data files and returns a list of MISTData objects.
 
-        :param files: A list of file paths to the raw data files.
+        :param file: A path or list of file paths to the raw data files.
         :param nproc: The number of processes to use for parallel processing. Default is None, which means no parallel
                       processing.
         :return: A list of MISTData objects.
@@ -138,25 +126,25 @@ class MISTData:
         files = ['data1.mist', 'data2.mist', 'data3.mist']
         data = MISTData.read_raw_many(files, nproc=2)
         """
-        if nproc is not None:
+        if isinstance(file, str):
+            return cls._read_raw(file)
+        else:
             with Pool(processes=nproc) as pool:
                 datafiles = list(
                     tqdm(
                         pool.imap(
                             par_func,
-                            zip(itertools.repeat(MISTData.read_raw), files),
+                            zip(itertools.repeat(MISTData.read_raw), file),
                         ),
-                        total=len(files),
+                        total=len(file),
+                        desc="Reading data files"
                     )
                 )
-        else:
-            datafiles = []
-            for f in tqdm(files):
-                datafiles.append(MISTData.read_raw(f))
-        return MISTData.from_raw_list(datafiles)
+                return datafiles
+
 
     @classmethod
-    def read_raw(cls, path: str):
+    def _read_raw(cls, path: str):
         """
         :class: MISTData
 
@@ -300,11 +288,18 @@ class MISTData:
         return cls(dut_recin, dut_lna, spec)
 
     def __add__(self, other):
+        if isinstance(other, int):
+            if other == 0:
+                return self
+
         return MISTData(
             self.dut_recin + other.dut_recin,
             self.dut_lna + other.dut_lna,
             self.spec + other.spec,
         )
+
+    def __radd__(self, other):
+        return self + other
 
     def __eq__(self, other):
         if (

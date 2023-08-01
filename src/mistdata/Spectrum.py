@@ -157,19 +157,6 @@ class Spectrum:
             obj.psd_noise_source_time = obj.psd_noise_source_time[:min_shape]
         return obj
 
-    @staticmethod
-    def from_list(obj_list) -> "Spectrum":
-        """
-        Create a new Spectrum object from a list of objects.
-
-        :param obj_list: A list of objects to create the Spectrum from.
-        :return: A new Spectrum object.
-        """
-        base = obj_list[0]
-        for i in range(1, len(obj_list)):
-            base += obj_list[i]
-        return base
-
     def calc_temp(self):
         """
         Calculates the antenna temperature using the formula:
@@ -203,18 +190,27 @@ class Spectrum:
     def plot_psd_noise_source(self, **kwargs):
         return plot_spec(self.freq, self.psd_noise_source_time, self.psd_noise_source, **kwargs)
 
-    def plot_temperature(self, **kwargs):
+    def plot_temp(self, **kwargs):
         if self.t_antenna is None:
             self.calc_temp()
-        return plot_spec(self.freq, self.psd_antenna_time, self.t_antenna, lim=(100, 1200), **kwargs)
 
-    def plot_psd_antenna_rows(self, rows: Sequence):
-        return plot_spec_rows(self.freq, self.psd_antenna, rows)
+        if 'vmin' not in kwargs:
+            kwargs['vmin'] = 100
+        if 'vmax' not in kwargs:
+            kwargs['vmax'] = 1200
+        return plot_spec(self.freq, self.psd_antenna_time, self.t_antenna, **kwargs)
 
-    def plot_psd_antenna_stats(self):
-        return plot_spec_stats(self.freq, self.psd_antenna)
+    def plot_psd_antenna_rows(self, rows: Sequence, **kwargs):
+        return plot_spec_rows(self.freq, self.psd_antenna, rows, **kwargs)
+
+    def plot_psd_antenna_stats(self, **kwargs):
+        return plot_spec_stats(self.freq, self.psd_antenna, **kwargs)
 
     def __add__(self, other):
+        if isinstance(other, int):
+            if other == 0:
+                return self
+
         if not isinstance(other, Spectrum):
             raise ValueError("Addition defined only for objects of the same class")
         # TODO: add derivative values
@@ -240,6 +236,9 @@ class Spectrum:
                 other.psd_noise_source_time,
             ),
         )
+
+    def __radd__(self, other):
+        return self + other
 
     def __eq__(self, other):
         if self.psd_antenna.shape != other.psd_antenna.shape:

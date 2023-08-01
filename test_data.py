@@ -27,8 +27,8 @@ files = [os.path.join(datadir, f) for f in names]
 # btherm = LSTBinnedTherm(therm)
 # btherm.save("mist2022binnedtherm.bmist")
 
-bin_data = LSTBinnedSpectra.load("mist2022binned.bmist")
-btherm = LSTBinnedTherm.load("mist2022binnedtherm.bmist")
+bin_data = LSTBinnedSpectra.load("models/mist2022binned.bmist")
+btherm = LSTBinnedTherm.load("models/mist2022binnedtherm.bmist")
 # plt.savefig("mist_data_occupancy.png", dpi=500, bbox_inches='tight')
 # btherm.plot_bin(btherm.ambient) #lst 0
 # plt.show()

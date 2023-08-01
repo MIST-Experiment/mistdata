@@ -102,6 +102,10 @@ class DUTRecIn:
         return obj
 
     def __add__(self, other):
+        if isinstance(other, int):
+            if other == 0:
+                return self
+
         if not isinstance(other, DUTRecIn):
             raise ValueError("Addition defined only for objects of the same class")
         return DUTRecIn(
@@ -143,6 +147,9 @@ class DUTRecIn:
                 other.s11_noise_source_time,
             ),
         )
+
+    def __radd__(self, other):
+        return self + other
 
     def __eq__(self, other):
         if self.s11_open.shape != other.s11_open.shape:

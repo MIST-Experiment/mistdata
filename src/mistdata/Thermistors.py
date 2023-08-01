@@ -101,6 +101,10 @@ class Thermistors:
         )
 
     def __add__(self, other):
+        if isinstance(other, int):
+            if other == 0:
+                return self
+
         if not isinstance(other, Thermistors):
             raise ValueError("Addition defined only for objects of the same class")
 
@@ -113,6 +117,9 @@ class Thermistors:
             np.hstack((self.ambient_load, other.ambient_load))[idxs],
             np.hstack((self.back_end, other.back_end))[idxs],
         )
+
+    def __radd__(self, other):
+        return self + other
 
     def __eq__(self, other):
         if self.time != other.time:

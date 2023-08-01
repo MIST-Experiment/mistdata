@@ -5,48 +5,57 @@ from matplotlib import pyplot as plt
 from datetime import datetime
 
 
-def plot_spec(x: Sequence, y: Sequence, spec: np.ndarray, lim=(1e11, 3.3e11), cmap='plasma'):
+def plot_spec(x: Sequence, y: Sequence, spec: np.ndarray, vmin=1e11, vmax=3.3e11, cmap='plasma', plot_index=False):
     """
     :param x: A sequence representing the x-axis values (frequency values in MHz).
     :param y: A sequence representing the y-axis values (time values).
     :param spec: A numpy ndarray representing the spectra.
     :param lim: A tuple specifying the minimum and maximum values for the colorbar limits.
                 Default value is (1e11, 3.3e11).
+    :param vmin: Minimum value for the lower colorbar limit.
+    :param vmax: Minimum value for the upper colorbar limit.
     :param cmap: A string specifying the color map for the spectrogram. Default value is 'plasma'.
 
     :return: A matplotlib Figure object representing the plotted spectrogram.
     """
-    if isinstance(y[0], datetime):
-        timespansec: int = (y[-1] - y[0]).total_seconds()
-        time_up_lim = timespansec / 60 if timespansec <= 10800 else timespansec / 3600
-        y_extent = (time_up_lim, 0)
-        ylabel = "Time [min]" if timespansec <= 10800 else "Time [h]"
-    elif isinstance(y[0], float):
-        y_extent = (y[-1], y[0])
-        ylabel = "LST [h]"
+    if plot_index:
+        ylabel = "Index"
+        yextent = (len(spec), 0)
     else:
-        raise ValueError("Unrecognized x-axis type")
+        if isinstance(y[0], datetime):
+            timespansec: int = (y[-1] - y[0]).total_seconds()
+            time_up_lim = timespansec / 60 if timespansec <= 10800 else timespansec / 3600
+            yextent = (time_up_lim, 0)
+            ylabel = "Time [min]" if timespansec <= 10800 else "Time [h]"
+        elif isinstance(y[0], float):
+            yextent = (y[-1], y[0])
+            ylabel = "LST [h]"
+        else:
+            raise ValueError("Unrecognized x-axis type")
 
     fig = plt.figure(figsize=(8.25, 6))
     plt.imshow(
         spec,
-        vmin=lim[0],
-        vmax=lim[1],
+        vmin=vmin,
+        vmax=vmax,
         aspect="auto",
         interpolation="none",
         cmap=cmap,
-        extent=[np.min(x), np.max(x), *y_extent]
+        extent=[np.min(x), np.max(x), *yextent]
     )
+    if plot_index:
+        ax = plt.gca()
+        ax.set_yticks(np.arange(0, len(spec), 5))
+        plt.grid(alpha=1, ls='--', axis='y', which='major')
     cb = plt.colorbar()
     cb.ax.tick_params(size=5)
     plt.xlabel(r"Frequency, MHz")
     plt.ylabel(ylabel)
-    plt.grid(alpha=0.2, ls=':')
+
     return fig
 
 
-
-def plot_spec_rows(x, spec, rows, limits=(1e11, 4e11)):
+def plot_spec_rows(x, spec, rows, vmin=1e11, vmax=4e11):
     """
     :param x: Array of x-coordinates for the plot.
     :param spec: 2D array of y-coordinates for each row.
@@ -71,14 +80,15 @@ def plot_spec_rows(x, spec, rows, limits=(1e11, 4e11)):
     """
     fig = plt.figure(figsize=(8.25, 6))
     for row in rows:
-        plt.plot(x, spec[row, :], label=f"Row {row}", lw=1)
-    plt.ylim(limits)
+        plt.plot(x, spec[row, :], lw=1, label=f"Row #{row}")
+    plt.ylim((vmin, vmax))
     plt.xlabel("Frequency [MHz]")
     plt.ylabel(r"PSD")
+    plt.legend()
     return fig
 
 
-def plot_spec_stats(x, spec):
+def plot_spec_stats(x, spec, vmin=1e11, vmax=4e11):
     """
     Plot the statistics of an antenna spectrum.
 
@@ -93,9 +103,7 @@ def plot_spec_stats(x, spec):
     plt.plot(x, np.median(spec, axis=0), label="Median")
 
     plt.legend()
-    plt.ylim(1e11, 4e11)
-    plt.ylabel(r"PSD", size=12)
-    plt.xlabel(r"Frequency [MHz]", size=12)
-    plt.title("Antenna spectrum characteristics", size=16)
+    plt.ylim(vmin, vmax)
+    plt.ylabel(r"PSD")
+    plt.xlabel(r"Frequency [MHz]")
     return fig
-
