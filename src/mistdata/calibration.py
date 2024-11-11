@@ -2,12 +2,14 @@
 High level tools for MIST calibration.
 """
 
+import numpy as np
 from . import cal_S11
+
 
 class S11:
 
     def __init__(
-        self, data, cal_kit=cal_s11.Keysight85033E, match_resistance=50
+        self, data, cal_kit=cal_S11.Keysight85033E, match_resistance=50
     ):
         """
         Base class for S11 measurements. End users should use either
@@ -49,14 +51,16 @@ class S11:
         s11_open = raw_s11.pop("open")
         s11_short = raw_s11.pop("short")
         s11_match = raw_s11.pop("match")
-        cal_s11 = np.array([s11_open, s11_short, s11_match])
-        vna_sparams = self.cal_kit.VNA_sparams(cal_S11)
+        vna_sparams = self.cal_kit.VNA_sparams(
+            np.array([s11_open, s11_short, s11_match])
+        )
 
         calibrated_s11 = {}
         for key, gamma in raw_s11.items():
             calibrated_s11[key] = cal_S11.de_embed_sparams(vna_sparams, gamma)
-        
+
         return calibrated_s11
+
 
 class AntennaS11(S11):
 
@@ -64,7 +68,7 @@ class AntennaS11(S11):
         self,
         data,
         pathA_sparams,
-        cal_kit=cal_s11.Keysight85033E,
+        cal_kit=cal_S11.Keysight85033E,
         match_resistance=50,
     ):
         """
@@ -105,11 +109,10 @@ class AntennaS11(S11):
 
         return s11
 
-        
     @property
     def s11(self):
         """
-        Return S11 data calibrated with the calibration kit and with the 
+        Return S11 data calibrated with the calibration kit and with the
         reference plane at the receiver input. The second step involves
         de-embedding the S-parameters of internal paths in the receiver (see
         Fig 19 in the MIST instrument paper, Monsalve et al. 2024).
@@ -138,7 +141,7 @@ class ReceiverS11(S11):
         data,
         pathB_sparams,
         pathC_sparams,
-        cal_kit=cal_s11.Keysight85033E,
+        cal_kit=cal_S11.Keysight85033E,
         match_resistance=50,
     ):
         """
@@ -179,11 +182,10 @@ class ReceiverS11(S11):
 
         return s11
 
-        
     @property
     def s11(self):
         """
-        Return S11 data calibrated with the calibration kit and with the 
+        Return S11 data calibrated with the calibration kit and with the
         reference plane at the receiver input. The second step involves
         de-embedding the S-parameters of internal paths in the receiver (see
         Fig 19 in the MIST instrument paper, Monsalve et al. 2024).
@@ -203,4 +205,3 @@ class ReceiverS11(S11):
             calibrated_s11[key] = cal_gamma
 
         return calibrated_s11
-

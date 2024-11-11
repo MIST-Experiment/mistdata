@@ -2,9 +2,12 @@
 Tools for calibrating S11 measurements.
 
 The calibration formalism is described in the MIST instrument paper (Monsalve
-et al. 2024; M24). Equations related to OSL calibration of reflection 
+et al. 2024; M24). Equations related to OSL calibration of reflection
 coefficient measurements are described in Monsalve et al. 2016 (M16).
 """
+
+import numpy as np
+
 
 def impedance_to_gamma(Z, Z0):
     """
@@ -25,6 +28,7 @@ def impedance_to_gamma(Z, Z0):
     """
     return (Z - Z0) / (Z + Z0)
 
+
 def calc_Z_off(Z0, delta_1ghz, f_Hz):
     """
     Calculate the impedance of the offset for the calibration standard. See
@@ -44,10 +48,11 @@ def calc_Z_off(Z0, delta_1ghz, f_Hz):
     complex
         Impedance of the offset.
 
-    
+
     """
     x = delta_1ghz / (4 * np.pi * f_Hz) * np.sqrt(f_Hz / 1e9)
     return Z0 + (1 - 1j) * x
+
 
 def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
     """
@@ -74,6 +79,7 @@ def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
     x = delay * delta_1ghz / (2 * Z0) * np.sqrt(f_Hz / 1e9)
     return 2j * np.pi * f_Hz * delay + (1 + 1j) * x
 
+
 def sparams_from_calkit(gamma_true, gamma_meas):
     """
     Get the S-parameters from an open-short-match calibration. See M16, Eq. 3.
@@ -97,11 +103,10 @@ def sparams_from_calkit(gamma_true, gamma_meas):
     gamma_true = np.array(gamma_true)
     gamma_meas = np.array(gamma_meas)
     # matrix to invert in eq 3
-    mat = np.column_stack((np.ones(3), gamma_true, gamma_true*gamma_meas))
+    mat = np.column_stack((np.ones(3), gamma_true, gamma_true * gamma_meas))
     sparams = np.linalg.lstsq(mat, gamma_meas, rcond=None)[0]
     sparams[1] += sparams[0] * sparams[2]  # need to do this to get S12 * S21
     return sparams
-
 
 
 def embed_sparams(sparams, gamma):
@@ -127,6 +132,7 @@ def embed_sparams(sparams, gamma):
     gamma_prime = s11 + s12s21 * gamma / (1 - s22 * gamma)
     return gamma_prime
 
+
 def de_embed_sparams(sparams, gamma_prime):
     """
     De-embed S-parameters from a network with measured reflection coefficient
@@ -151,11 +157,12 @@ def de_embed_sparams(sparams, gamma_prime):
     gamma = d / (s12s21 + s22 * d)
     return gamma
 
+
 class CalStandard:
 
     def __init__(self, Z_ter, Z_off, l_x_gamma, Z0=50):
         """
-        Useful measured and derived values for a calibration standard. Note 
+        Useful measured and derived values for a calibration standard. Note
         that all quantities are in SI units.
 
         Parameters
@@ -210,7 +217,6 @@ class CalStandard:
         """
         return impedance_to_gamma(self.Z_off, self.Z0)
 
-        
     @property
     def gamma(self):
         """
@@ -223,7 +229,7 @@ class CalStandard:
             Reflection coefficient.
 
         """
-        
+
         exp = np.exp(-2j * self.l_x_gamma)
         # numerator
         num1 = self.gamma_off * (1 - exp) + self.gamma_ter * exp
@@ -256,7 +262,7 @@ class CalKit:
     @property
     def omega(self):
         return 2 * np.pi * self.freq_Hz
-    
+
     def _add_standard(self, Z_ter, delta_1ghz, delay):
         """
         Add a calibration standard to the calibration kit. Users should use
@@ -335,7 +341,7 @@ class CalKit:
 
     def VNA_sparams(self, measured_cal_standards):
         """
-        Get the VNA s-parameters using measurements of the open, short, and 
+        Get the VNA s-parameters using measurements of the open, short, and
         match calibration standards.
 
         Parameters
@@ -352,7 +358,7 @@ class CalKit:
 
         """
         gamma_true = [self.open.gamma, self.short.gamma, self.match.gamma]
-        return sparams_from_osl(gamma_true, measured_cal_standards)
+        return sparams_from_calkit(gamma_true, measured_cal_standards)
 
 
 class Keysight85033E(CalKit):
@@ -377,7 +383,7 @@ class Keysight85033E(CalKit):
         C_open = np.polyval(C_coeffs, freq_Hz)
         open_delay = 29.243e-12
         open_loss = 2.2e9
-        
+
         # short standard
         L_coeffs = (-1.000e-44, 2.171e-33, -1.085e-22, 2.077e-12)
         L_short = np.polyval(L_coeffs, freq_Hz)
