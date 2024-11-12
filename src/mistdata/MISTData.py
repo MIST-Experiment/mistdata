@@ -175,13 +175,6 @@ class MISTData:
                 24: "lna",
             }
             s11 = {"recin": {}, "lna": {}}
-            # initialize s11 dict with None
-            for case, key in s11_cases.items():
-                if 10 <= case <= 16:
-                    s11_dict = s11["recin"]
-                elif 20 <= case <= 24:
-                    s11_dict = s11["lna"]
-                s11_dict[key] = None
 
             try:
                 for line in fin:
@@ -211,7 +204,9 @@ class MISTData:
                             v = line_array[8:].real
                         else:
                             v = line_array[8:]
-                        s11_dict[key] = _assign_or_stack(s11_dict[key], v)
+                        s11_dict[key] = _assign_or_stack(
+                            s11_dict.get(key, None), v
+                        )
                         if key == "open_":
                             time_key = "open_time"
                         else:
