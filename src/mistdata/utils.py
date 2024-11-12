@@ -12,7 +12,7 @@ def add_sort_time_pair(arr1, time1, arr2, time2):
     and returns the sorted arrays and time arrays.
     """
     time = combine_times(time1, time2)
-    arr = np.hstack((arr1, arr2))
+    arr = np.squeeze(np.vstack((arr1, arr2)))
     idxs = np.argsort(time)
     return arr[idxs], [time[i] for i in idxs]
 
