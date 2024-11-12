@@ -110,7 +110,6 @@ class MISTData:
             obj = cls(dut_recin=dutrecin, dut_lna=dutlna, spec=spec)
         return obj
 
-
     @classmethod
     def read_raw(cls, file: str | List[str], nproc=1):
         """
@@ -142,7 +141,6 @@ class MISTData:
                 )
                 return datafiles
 
-
     @classmethod
     def _read_raw(cls, path: str):
         """
@@ -158,6 +156,33 @@ class MISTData:
             spec_antenna = None
             spec_ambient = None
             spec_noise_source = None
+
+            recin_therm = None
+            lna_therm = None
+
+            s11_cases = {
+                10: "freq",
+                11: "open_",  # open is a reserved keyword
+                12: "short",
+                13: "match",
+                14: "antenna",
+                15: "ambient",
+                16: "noise_source",
+                20: "freq",
+                21: "open_",
+                22: "short",
+                23: "match",
+                24: "lna",
+            }
+            s11 = {"recin": {}, "lna": {}}
+            # initialize s11 dict with None
+            for case, key in s11_cases.items():
+                if 10 <= case <= 16:
+                    s11_dict = s11["recin"]
+                elif 20 <= case <= 24:
+                    s11_dict = s11["lna"]
+                s11_dict[key] = None
+
             try:
                 for line in fin:
                     line = line.decode("utf-8")
@@ -168,60 +193,55 @@ class MISTData:
 
                     if case == 1:
                         time = _extract_time(line_array)
-                        recin_therm = Thermistors(time, *line_array[[8, 9, 10, 13]].real)
-                    elif case == 10:
-                        recin_s11_freq = line_array[8:].real
-                        recin_s11_freq_time = _extract_time(line_array)
-                    elif case == 11:
-                        recin_s11_open = line_array[8:]
-                        recin_s11_open_time = _extract_time(line_array)
-                    elif case == 12:
-                        recin_s11_short = line_array[8:]
-                        recin_s11_short_time = _extract_time(line_array)
-                    elif case == 13:
-                        recin_s11_match = line_array[8:]
-                        recin_s11_match_time = _extract_time(line_array)
-                    elif case == 14:
-                        recin_s11_antenna = line_array[8:]
-                        recin_s11_antenna_time = _extract_time(line_array)
-                    elif case == 15:
-                        recin_s11_ambient = line_array[8:]
-                        recin_s11_ambient_time = _extract_time(line_array)
-                    elif case == 16:
-                        recin_s11_noise_source = line_array[8:]
-                        recin_s11_noise_source_time = _extract_time(line_array)
+                        therm = Thermistors(
+                            time, *line_array[[8, 9, 10, 13]].real
+                        )
+                        recin_therm = _assign_or_stack(recin_therm, therm)
                     elif case == 2:
                         time = _extract_time(line_array)
-                        lna_therm = Thermistors(time, *line_array[8:12].real)
-                    elif case == 20:
-                        lna_s11_freq = line_array[8:].real
-                        lna_s11_freq_time = _extract_time(line_array)
-                    elif case == 21:
-                        lna_s11_open = line_array[8:]
-                        lna_s11_open_time = _extract_time(line_array)
-                    elif case == 22:
-                        lna_s11_short = line_array[8:]
-                        lna_s11_short_time = _extract_time(line_array)
-                    elif case == 23:
-                        lna_s11_match = line_array[8:]
-                        lna_s11_match_time = _extract_time(line_array)
-                    elif case == 24:
-                        lna_s11_lna = line_array[8:]
-                        lna_s11_lna_time = _extract_time(line_array)
+                        therm = Thermistors(time, *line_array[8:12].real)
+                        lna_therm = _assign_or_stack(lna_therm, therm)
+                    elif case in s11_cases:
+                        if 10 <= case <= 16:
+                            s11_dict = s11["recin"]
+                        elif 20 <= case <= 24:
+                            s11_dict = s11["lna"]
+                        key = s11_cases[case]
+                        if key == "freq":
+                            v = line_array[8:].real
+                        else:
+                            v = line_array[8:]
+                        s11_dict[key] = _assign_or_stack(s11_dict[key], v)
+                        if key == "open_":
+                            time_key = "open_time"
+                        else:
+                            time_key = key + "_time"
+                        s11_dict[time_key] = _assign_or_stack(
+                            s11_dict.get(time_key, None),
+                            _extract_time(line_array),
+                        )
                     elif case == 3:
                         spec_therm = _assign_or_stack(spec_therm, line_array)
                     elif case == 30:
                         spec_freq = line_array[8:].real
                         # spec_freq_time = _extract_time(line_array)
                     elif case == 31:
-                        spec_antenna = _assign_or_stack(spec_antenna, line_array)
+                        spec_antenna = _assign_or_stack(
+                            spec_antenna, line_array
+                        )
                     elif case == 32:
-                        spec_ambient = _assign_or_stack(spec_ambient, line_array)
+                        spec_ambient = _assign_or_stack(
+                            spec_ambient, line_array
+                        )
                     elif case == 33:
-                        spec_noise_source = _assign_or_stack(spec_noise_source, line_array)
+                        spec_noise_source = _assign_or_stack(
+                            spec_noise_source, line_array
+                        )
+
             except EOFError:
                 return None
 
+            _has_spec = True
             try:
                 spec_therm_time = [_extract_time(arr) for arr in spec_therm]
                 spec_therm_lna = spec_therm[:, 8].real
@@ -238,53 +258,35 @@ class MISTData:
                 # raise RuntimeError(f"Cannot read_raw file {path}")
                 return None
 
+            except TypeError:  # reading calibration file without spec data
+                _has_spec = False
+
             dut_recin = DUTRecIn(
-                recin_therm,
-                recin_s11_freq,
-                recin_s11_freq_time,
-                recin_s11_open,
-                recin_s11_open_time,
-                recin_s11_short,
-                recin_s11_short_time,
-                recin_s11_match,
-                recin_s11_match_time,
-                recin_s11_antenna,
-                recin_s11_antenna_time,
-                recin_s11_ambient,
-                recin_s11_ambient_time,
-                recin_s11_noise_source,
-                recin_s11_noise_source_time,
+                recin_therm, **{k: v for k, v in s11["recin"].items()}
             )
             dut_lna = DUTLNA(
-                lna_therm,
-                lna_s11_freq,
-                lna_s11_freq_time,
-                lna_s11_open,
-                lna_s11_open_time,
-                lna_s11_short,
-                lna_s11_short_time,
-                lna_s11_match,
-                lna_s11_match_time,
-                lna_s11_lna,
-                lna_s11_lna_time,
+                lna_therm, **{k: v for k, v in s11["lna"].items()}
             )
-            spec_t = Thermistors(
-                spec_therm_time,
-                spec_therm_lna,
-                spec_therm_vna_load,
-                spec_therm_ambient_load,
-                spec_therm_back_end,
-            )
-            spec = Spectrum(
-                spec_t,
-                spec_freq,
-                spec_t_antenna,
-                spec_t_antenna_time,
-                spec_t_ambient,
-                spec_t_ambient_time,
-                spec_t_noise_source,
-                spec_t_noise_source_time,
-            )
+            if _has_spec:
+                spec_t = Thermistors(
+                    spec_therm_time,
+                    spec_therm_lna,
+                    spec_therm_vna_load,
+                    spec_therm_ambient_load,
+                    spec_therm_back_end,
+                )
+                spec = Spectrum(
+                    spec_t,
+                    spec_freq,
+                    spec_t_antenna,
+                    spec_t_antenna_time,
+                    spec_t_ambient,
+                    spec_t_ambient_time,
+                    spec_t_noise_source,
+                    spec_t_noise_source_time,
+                )
+            else:
+                spec = None
         return cls(dut_recin, dut_lna, spec)
 
     def __add__(self, other):
