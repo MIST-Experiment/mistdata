@@ -2,206 +2,162 @@
 High level tools for MIST calibration.
 """
 
+from functools import cached_property
 import numpy as np
-from . import cal_S11
+from mistdata import AntennaS11, ReceiverS11
+from mistdata.cal_S11 import Keysight85033E
 
+class MISTCalibration:
 
-class S11:
+    t_assumed_L = 300  # assumed temperature of load
+    t_assumed_LNS = 2300  # assumed temperature of load + noise source
 
     def __init__(
-        self, data, cal_kit=cal_S11.Keysight85033E, match_resistance=50
+        self,
+        mistdata,
+        cal_data,
+        cal_kit=Keysight85033E,
+        match_resistance=50,
     ):
         """
-        Base class for S11 measurements. End users should use either
-        AntennaS11 or ReceiverS11.
+        Class holding parameters and methods needed for MIST calibration,
+        going from antenna PSD to sky temperature.
 
         Parameters
         ----------
-        data : mistdata.MISTData.DUTrecIn or mistdata.MISTData.DUTLNA
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
+        mistdata : MISTData
+            MISTData object containing the data to be calibrated.
+        cal_data : dict
+            Dictionary containing the calibration data. The keys are
+            'pathA_sparams', 'pathB_sparams', 'pathC_sparams', 'nw_params',
+            and 'C_params'. The values are the s parameters of the internal 
+            path, and the noise wave parameters with corrections.
+        cal_kit : class
+            Class to be instantiated for the calibration kit. See the
+            CalKit class in cal_S11.py for an example.
         match_resistance : float
-            Resistance of the match used in the calibration kit.
+            Resistance of the match in ohms used in the calibration kit.
 
         """
-        self.freq = data.s11_freq  # in MHz
-        self.data = data
-        freq_Hz = self.freq * 1e6
-        self.cal_kit = cal_kit(freq_Hz, match_resistance=match_resistance)
+        self.mistdata = mistdata
+        self.spec = mistdata.spectrum
+        # s parameters of internal path
+        pathA_sparams = cal_data["pathA_sparams"]
+        pathB_sparams = cal_data["pathB_sparams"]
+        pathC_sparams = cal_data["pathC_sparams"]
+        # noise wave parameters
+        self.nw_params = cal_data["nw_params"]
+        self.C_params = cal_data["C_params"]  # corrections to nw parameters
 
-        self._raw_S11 = {
-            "open": self.data.s11_open,
-            "short": self.data.s11_short,
-            "match": self.data.s11_match,
-        }
-
-    def _cal_step1(self):
-        """
-        Calibrate the raw S11 data with the calibration kit. This is the first
-        step in the calibration process. End users should use the s11 property
-        of the AntennaS11 or ReceiverS11 classes directly.
-
-        Returns
-        -------
-        calibrated_s11 : dict
-            Dictionary containing the calibrated S11 data.
-
-        """
-        raw_s11 = self.raw_S11
-        s11_open = raw_s11.pop("open")
-        s11_short = raw_s11.pop("short")
-        s11_match = raw_s11.pop("match")
-        vna_sparams = self.cal_kit.VNA_sparams(
-            np.array([s11_open, s11_short, s11_match])
+        # s11 parameters
+        ant_s11 = AntennaS11(
+            mistdata.dut_recin,
+            pathA_sparams,
+            cal_kit=cal_kit,
+            match_resistance=match_resistance,
+        )
+        self.gamma_a = ant_s11.s11
+        rec_s11 = ReceiverS11(
+            mistdata.dut_lna,
+            pathB_sparams,
+            pathC_sparams,
+            cal_kit=cal_kit,
+            match_resistance=match_resistance,
         )
 
-        calibrated_s11 = {}
-        for key, gamma in raw_s11.items():
-            calibrated_s11[key] = cal_S11.de_embed_sparams(vna_sparams, gamma)
-
-        return calibrated_s11
-
-
-class AntennaS11(S11):
-
-    def __init__(
-        self,
-        data,
-        pathA_sparams,
-        cal_kit=cal_S11.Keysight85033E,
-        match_resistance=50,
-    ):
+    @cached_property
+    def k_params(self):
         """
-        Class for antenna S11 measurements.
+        Calculate the k parameters for the calibration, given in Equations
+        8-11 of the MIST instrument paper (Monsalve et al. 2024).
+
+        Returns
+        -------
+        dict
+            Dictionary containing the k parameters. The keys are
+            'k0', 'kU', 'kC', 'kS'.
+        """
+        # intermediate parameters
+        xa = 1 - np.abs(self.gamma_a)**2
+        xr = 1 - np.abs(self.gamma_r)**2
+        F = np.sqrt(xr) / (1 - self.gamma_a * self.gamma_r)  # eq 12
+        alpha = np.angle(self.gamma_a * F)  # eq 13
+
+        _k_params = {}
+        _k_params["k0"] = xr / (xa * np.abs(F)**2)
+        kU = np.abs(self.gamma_a)**2 / xa
+        _k_params["kU"] = kU
+        _k_params["kC"] = kU / np.abs(F) * np.cos(alpha)
+        _k_params["kS"] = kU / np.abs(F) * np.sin(alpha)
+        return _k_params
+
+    @cached_property
+    def receiver_gain(self):
+        """
+        Calculate the receiver gain of the receiver, given in Equation 6 of
+        the MIST instrument paper (Monsalve et al. 2024).
+
+        Returns
+        -------
+        float
+            Receiver gain.
+        """
+        pdiff = self.spec.psd_noise_source - self.spec.psd_ambient
+        tdiff = self.t_assumed_LNS - self.t_assumed_L
+        k0 = self.k_params["k0"]
+        C1 = self.C_params["C1"]
+        return pdiff / (k0 * C1 * tdiff)
+
+    @cached_property
+    def receiver_temp(self):
+        """
+        Calculate the receiver temperature of the receiver, given in
+        Equation 7 of the MIST instrument paper (Monsalve et al. 2024).
+
+        Returns
+        -------
+        float
+            Receiver temperature in Kelvin.
+        """
+        t1 = self.spec.psd_ambient / self.receiver_gain
+        t2 = self.k_params["k0"] * (self.t_assumed_L - self.C_params["C2"])
+        U = self.k_params["kU"] * self.nw_params["TU"]
+        C = self.k_params["kC"] * self.nw_params["TC"]
+        S = self.k_params["kS"] * self.nw_params["TS"]
+        return t1 - t2 + U + C + S
+
+    @cached_property
+    def antenna_temp(self):
+        """
+        Calculate the antenna temperature of the antenna, given in
+        Equation 5 of the MIST instrument paper (Monsalve et al. 2024).
+        """
+        return self.spec.psd_antenna / self.receiver_gain - self.receiver_temp
+
+    def calc_Tsky(self, Tphys=0, eta_rad=1, eta_beam=1, eta_balun=1):
+        """
+        Calculate the sky temperature given the radiation efficiency,
+        beam efficiency, balun efficiency, and the temperature of the
+        passive loss sources. To exclude any of the effects, simply leave
+        the variable as their default values. This is useful e.g. if there
+        is no balun.
 
         Parameters
         ----------
-        data : mistdata.MISTData.DUTrecIn
-        pathA_sparams : array-like
-            S-parameters of the path A in the receiver. See Fig 19 in the MIST
-            instrument paper, Monsalve et al. 2024.
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
-        match_resistance : float
-            Resistance of the match used in the calibration kit.
-
-        """
-        super().__init__(data, cal_kit, match_resistance)
-        self.pathA_sparams = pathA_sparams
-
-    @property
-    def raw_S11(self):
-        """
-        Return the raw S11 data.
+        Tphys : float
+            Physical temperature associated with passive loss sources.
+        eta_rad : float
+            Radiation efficiency.
+        eta_beam : float
+            Beam efficiency.
+        eta_balun : float
+            Balun efficiency.
 
         Returns
         -------
-        s11 : dict
-            Dictionary containing the raw S11 data.
-            Keys are 'open', 'short', 'match', 'antenna', 'ambient', and
-            'noise_source'.
+        float
+            Sky temperature in Kelvin.
 
         """
-        s11 = self._raw_S11
-        s11["antenna"] = self.data.s11_antenna
-        s11["ambient"] = self.data.s11_ambient
-        s11["noise_source"] = self.data.s11_noise_source
-
-        return s11
-
-    @property
-    def s11(self):
-        """
-        Return S11 data calibrated with the calibration kit and with the
-        reference plane at the receiver input. The second step involves
-        de-embedding the S-parameters of internal paths in the receiver (see
-        Fig 19 in the MIST instrument paper, Monsalve et al. 2024).
-
-        Returns
-        -------
-        calibrated_s11 : dict
-            Dictionary containing the calibrated S11 data. Keys are 'antenna',
-            'ambient', and 'noise_source'.
-
-        """
-        calibrated_s11 = self._cal_step1()  # open, short, match calibration
-        # de-embed S-parameters of path A in the receiver
-        for key, gamma in calibrated_s11.items():
-            calibrated_s11[key] = cal_S11.de_embed_sparams(
-                self.pathA_sparams, gamma
-            )
-
-        return calibrated_s11
-
-
-class ReceiverS11(S11):
-
-    def __init__(
-        self,
-        data,
-        pathB_sparams,
-        pathC_sparams,
-        cal_kit=cal_S11.Keysight85033E,
-        match_resistance=50,
-    ):
-        """
-        Class for receiver S11 measurements.
-
-        Parameters
-        ----------
-        data : mistdata.MISTData.DUTrecIn
-        pathB_sparams : array-like
-            S-parameters of the path B in the receiver. See Fig 19 in the MIST
-            instrument paper, Monsalve et al. 2024.
-        pathC_sparams : array-like
-            S-parameters of the path C in the receiver.
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
-        match_resistance : float
-            Resistance of the match used in the calibration kit.
-
-        """
-        super().__init__(data, cal_kit, match_resistance)
-        self.pathB_sparams = pathB_sparams
-        self.pathC_sparams = pathC_sparams
-
-    @property
-    def raw_S11(self):
-        """
-        Return the raw S11 data.
-
-        Returns
-        -------
-        s11 : dict
-            Dictionary containing the raw S11 data.
-            Keys are 'open', 'short', 'match', 'lna'.
-
-        """
-        s11 = self._raw_S11
-        s11["lna"] = self.data.s11_lna
-
-        return s11
-
-    @property
-    def s11(self):
-        """
-        Return S11 data calibrated with the calibration kit and with the
-        reference plane at the receiver input. The second step involves
-        de-embedding the S-parameters of internal paths in the receiver (see
-        Fig 19 in the MIST instrument paper, Monsalve et al. 2024).
-
-        Returns
-        -------
-        calibrated_s11 : dict
-            Dictionary containing the calibrated S11 data. Key is 'lna'.
-
-        """
-        calibrated_s11 = self._cal_step1()  # open, short, match calibration
-        # de-embed S-parameters of path B in the receiver and embed the
-        # S-parameters of path C in the receiver
-        for key, gamma in calibrated_s11.items():
-            cal_gamma = cal_S11.de_embed_sparams(self.pathB_sparams, gamma)
-            cal_gamma = cal_S11.embed_sparams(self.pathC_sparams, cal_gamma)
-            calibrated_s11[key] = cal_gamma
-
-        return calibrated_s11
+        eta = eta_rad * eta_beam * eta_balun
+        return (self.antenna_temp - (1 - eta) * Tphys) / eta
