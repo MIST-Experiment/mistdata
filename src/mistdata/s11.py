@@ -5,12 +5,12 @@ Tools for MIST S11 measurements.
 import numpy as np
 from . import cal_S11
 
+# Default model for reflection coefficients of the calibration network.
+MODEL_GAMMA = {"open": 1, "short": -1, "match": 0}
 
 class S11:
 
-    def __init__(
-        self, data, cal_kit=cal_S11.Keysight85033E, match_resistance=50
-    ):
+    def __init__(self, data, model_gamma=MODEL_GAMMA):
         """
         Base class for S11 measurements. End users should use either
         AntennaS11 or ReceiverS11.
@@ -18,43 +18,47 @@ class S11:
         Parameters
         ----------
         data : mistdata.MISTData.DUTrecIn or mistdata.MISTData.DUTLNA
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
-        match_resistance : float
-            Resistance of the match used in the calibration kit.
+        model_gamma : dict
+            Dictionary containing the model of reflection coefficients for the
+            calibration network. Keys are 'open', 'short', and 'match'. The 
+            default values are used for generic SMA caps and loads. This is 
+            not perfect, but will be absorbed by the calibration step that 
+            shifts the reference plane to the receiver input.
 
         """
         self.freq = data.s11_freq  # in MHz
         self.data = data
-        freq_Hz = self.freq * 1e6
-        self.cal_kit = cal_kit(freq_Hz, match_resistance=match_resistance)
+        for k, v in model_gamma.items():
+            model_gamma[k] = np.atleast_1d(v)  # add frequency axis if scalar
+        self.model_gamma = np.array(
+            [model_gamma["open"], model_gamma["short"], model_gamma["match"]],
+            dtype=complex,
+        )
+            
 
-        self._raw_S11 = {
-            "open": self.data.s11_open,
-            "short": self.data.s11_short,
-            "match": self.data.s11_match,
-        }
-
-    def _cal_step1(self):
+    @property
+    def vna_sparams(self):
         """
-        Calibrate the raw S11 data with the calibration kit. This is the first
-        step in the calibration process. End users should use the s11 property
-        of the AntennaS11 or ReceiverS11 classes directly.
+        Return the S-parameters of the VNA.
+        """
+        gamma_meas = np.array(
+            [self.data.s11_open, self.data.s11_short, self.data.s11_match]
+        )
+        return cal_S11.network_sparams(self.model_gamma, gamma_meas)
+
+    @property
+    def cal_s11_internal(self):
+        """
+        Return S11 data calibrated at the internal reference plane of the
+        receiver. This is the first step in the calibration process.
 
         Returns
         -------
         calibrated_s11 : dict
-            Dictionary containing the calibrated S11 data.
+            Dictionary containing the calibrated S11 data. Keys are the same
+            as for raw_S11.
 
         """
-        raw_s11 = self.raw_S11
-        s11_open = raw_s11.pop("open")
-        s11_short = raw_s11.pop("short")
-        s11_match = raw_s11.pop("match")
-        vna_sparams = self.cal_kit.VNA_sparams(
-            np.array([s11_open, s11_short, s11_match])
-        )
-
         calibrated_s11 = {}
         for key, gamma in raw_s11.items():
             calibrated_s11[key] = cal_S11.de_embed_sparams(vna_sparams, gamma)
@@ -64,13 +68,7 @@ class S11:
 
 class AntennaS11(S11):
 
-    def __init__(
-        self,
-        data,
-        pathA_sparams,
-        cal_kit=cal_S11.Keysight85033E,
-        match_resistance=50,
-    ):
+    def __init__(self, data, pathA_sparams, model_gamma=MODEL_GAMMA):
         """
         Class for antenna S11 measurements.
 
@@ -80,13 +78,15 @@ class AntennaS11(S11):
         pathA_sparams : array-like
             S-parameters of the path A in the receiver. See Fig 19 in the MIST
             instrument paper, Monsalve et al. 2024.
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
-        match_resistance : float
-            Resistance of the match used in the calibration kit.
+        model_gamma : dict
+            Dictionary containing the model of reflection coefficients for the
+            calibration network. Keys are 'open', 'short', and 'match'. The 
+            default values are used for generic SMA caps and loads. This is 
+            not perfect, but will be absorbed by the calibration step that 
+            shifts the reference plane to the receiver input.
 
         """
-        super().__init__(data, cal_kit, match_resistance)
+        super().__init__(data, model_gamma=model_gamma)
         self.pathA_sparams = pathA_sparams
 
     @property
@@ -97,16 +97,15 @@ class AntennaS11(S11):
         Returns
         -------
         s11 : dict
-            Dictionary containing the raw S11 data.
-            Keys are 'open', 'short', 'match', 'antenna', 'ambient', and
-            'noise_source'.
+            Dictionary containing the raw S11 data. Keys are 'antenna', 
+            'ambient', and 'noise_source'.
 
         """
-        s11 = self._raw_S11
-        s11["antenna"] = self.data.s11_antenna
-        s11["ambient"] = self.data.s11_ambient
-        s11["noise_source"] = self.data.s11_noise_source
-
+        s11 = {
+            "antenna": self.data.s11_antenna,
+            "ambient": self.data.s11_ambient,
+            "noise_source": self.data.s11_noise_source,
+        }
         return s11
 
     @property
@@ -124,9 +123,9 @@ class AntennaS11(S11):
             'ambient', and 'noise_source'.
 
         """
-        calibrated_s11 = self._cal_step1()  # open, short, match calibration
+        calibrated_s11 = {}
         # de-embed S-parameters of path A in the receiver
-        for key, gamma in calibrated_s11.items():
+        for key, gamma in self.cal_s11_internal.items():
             calibrated_s11[key] = cal_S11.de_embed_sparams(
                 self.pathA_sparams, gamma
             )
@@ -173,13 +172,10 @@ class ReceiverS11(S11):
         Returns
         -------
         s11 : dict
-            Dictionary containing the raw S11 data.
-            Keys are 'open', 'short', 'match', 'lna'.
+            Dictionary containing the raw S11 data. Only key is 'lna'.
 
         """
-        s11 = self._raw_S11
-        s11["lna"] = self.data.s11_lna
-
+        s11 = {"lna": self.data.s11_lna}
         return s11
 
     @property
@@ -196,10 +192,10 @@ class ReceiverS11(S11):
             Dictionary containing the calibrated S11 data. Key is 'lna'.
 
         """
-        calibrated_s11 = self._cal_step1()  # open, short, match calibration
+        calibrated_s11 = {}
         # de-embed S-parameters of path B in the receiver and embed the
         # S-parameters of path C in the receiver
-        for key, gamma in calibrated_s11.items():
+        for key, gamma in self.cal_s11_internal.items():
             cal_gamma = cal_S11.de_embed_sparams(self.pathB_sparams, gamma)
             cal_gamma = cal_S11.embed_sparams(self.pathC_sparams, cal_gamma)
             calibrated_s11[key] = cal_gamma
