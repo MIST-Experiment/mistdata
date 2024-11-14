@@ -80,9 +80,11 @@ def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
     return 2j * np.pi * f_Hz * delay + (1 + 1j) * x
 
 
-def sparams_from_calkit(gamma_true, gamma_meas):
+def network_sparams(gamma_true, gamma_meas):
     """
-    Get the S-parameters from an open-short-match calibration. See M16, Eq. 3.
+    Get the S-parameters of a network by comparing the measured reflection
+    coefficients of the open, short, and match standards to a model of their
+    reflection coefficients (the "true" values). See M16, Eq. 3.
 
     Parameters
     ----------
@@ -100,13 +102,15 @@ def sparams_from_calkit(gamma_true, gamma_meas):
         the product of S12 and S21, not their individual values.
 
     """
-    gamma_true = np.array(gamma_true)
-    gamma_meas = np.array(gamma_meas)
-    # matrix to invert in eq 3
-    mat = np.column_stack((np.ones(3), gamma_true, gamma_true * gamma_meas))
-    sparams = np.linalg.lstsq(mat, gamma_meas, rcond=None)[0]
+    gamma_true = np.array(gamma_true, dtype=complex).T  # (nfreq, 3)
+    gamma_meas = np.array(gamma_meas, dtype=complex).T
+    # ``nfreq'' number of 3x3 matrices to invert in eq 3
+    mat = np.dstack(
+        ((np.ones_like(gamma_true), gamma_true, gamma_true * gamma_meas))
+    )
+    sparams = np.linalg.solve(mat, gamma_meas[..., None]).T  # (3, nfreq)
     sparams[1] += sparams[0] * sparams[2]  # need to do this to get S12 * S21
-    return sparams
+    return np.squeeze(sparams)
 
 
 def embed_sparams(sparams, gamma):
@@ -338,27 +342,6 @@ class CalKit:
 
         """
         self.match = self._add_standard(Z_match, delta_1ghz, delay)
-
-    def VNA_sparams(self, measured_cal_standards):
-        """
-        Get the VNA s-parameters using measurements of the open, short, and
-        match calibration standards.
-
-        Parameters
-        ----------
-        measured_cal_standards : array-like
-            Measured reflection coefficients for the open, short, and match
-            standards. Shape is (3, nfreq).
-
-        Returns
-        -------
-        sparams : ndarray
-            S-parameters in the form [S11, S12 * S21, S22]. This can be de-
-            embed to calibrate S11 measurements.
-
-        """
-        gamma_true = [self.open.gamma, self.short.gamma, self.match.gamma]
-        return sparams_from_calkit(gamma_true, measured_cal_standards)
 
 
 class Keysight85033E(CalKit):
