@@ -5,12 +5,10 @@ Tools for MIST S11 measurements.
 import numpy as np
 from . import cal_S11
 
-# Default model for reflection coefficients of the calibration network.
-MODEL_GAMMA = {"open": 1, "short": -1, "match": 0}
 
 class S11:
 
-    def __init__(self, data, model_gamma=MODEL_GAMMA):
+    def __init__(self, data, model_gamma):
         """
         Base class for S11 measurements. End users should use either
         AntennaS11 or ReceiverS11.
@@ -20,10 +18,7 @@ class S11:
         data : mistdata.MISTData.DUTrecIn or mistdata.MISTData.DUTLNA
         model_gamma : dict
             Dictionary containing the model of reflection coefficients for the
-            calibration network. Keys are 'open', 'short', and 'match'. The 
-            default values are used for generic SMA caps and loads. This is 
-            not perfect, but will be absorbed by the calibration step that 
-            shifts the reference plane to the receiver input.
+            calibration network. Keys are 'open', 'short', and 'match'.
 
         """
         self.freq = data.s11_freq  # in MHz
@@ -34,7 +29,6 @@ class S11:
             [model_gamma["open"], model_gamma["short"], model_gamma["match"]],
             dtype=complex,
         )
-            
 
     @property
     def vna_sparams(self):
@@ -60,15 +54,17 @@ class S11:
 
         """
         calibrated_s11 = {}
-        for key, gamma in raw_s11.items():
-            calibrated_s11[key] = cal_S11.de_embed_sparams(vna_sparams, gamma)
+        for key, gamma in self.raw_s11.items():
+            calibrated_s11[key] = cal_S11.de_embed_sparams(
+                self.vna_sparams, gamma
+            )
 
         return calibrated_s11
 
 
 class AntennaS11(S11):
 
-    def __init__(self, data, pathA_sparams, model_gamma=MODEL_GAMMA):
+    def __init__(self, data, pathA_sparams, model_gamma):
         """
         Class for antenna S11 measurements.
 
@@ -80,13 +76,10 @@ class AntennaS11(S11):
             instrument paper, Monsalve et al. 2024.
         model_gamma : dict
             Dictionary containing the model of reflection coefficients for the
-            calibration network. Keys are 'open', 'short', and 'match'. The 
-            default values are used for generic SMA caps and loads. This is 
-            not perfect, but will be absorbed by the calibration step that 
-            shifts the reference plane to the receiver input.
+            calibration network. Keys are 'open', 'short', and 'match'.
 
         """
-        super().__init__(data, model_gamma=model_gamma)
+        super().__init__(data, model_gamma)
         self.pathA_sparams = pathA_sparams
 
     @property
@@ -97,7 +90,7 @@ class AntennaS11(S11):
         Returns
         -------
         s11 : dict
-            Dictionary containing the raw S11 data. Keys are 'antenna', 
+            Dictionary containing the raw S11 data. Keys are 'antenna',
             'ambient', and 'noise_source'.
 
         """
@@ -135,14 +128,7 @@ class AntennaS11(S11):
 
 class ReceiverS11(S11):
 
-    def __init__(
-        self,
-        data,
-        pathB_sparams,
-        pathC_sparams,
-        cal_kit=cal_S11.Keysight85033E,
-        match_resistance=50,
-    ):
+    def __init__(self, data, pathB_sparams, pathC_sparams, model_gamma):
         """
         Class for receiver S11 measurements.
 
@@ -154,13 +140,12 @@ class ReceiverS11(S11):
             instrument paper, Monsalve et al. 2024.
         pathC_sparams : array-like
             S-parameters of the path C in the receiver.
-        cal_kit : mistdata.CalKit
-            Class to be instantiated for the calibration kit.
-        match_resistance : float
-            Resistance of the match used in the calibration kit.
+        model_gamma : dict
+            Dictionary containing the model of reflection coefficients for the
+            calibration network. Keys are 'open', 'short', and 'match'.
 
         """
-        super().__init__(data, cal_kit, match_resistance)
+        super().__init__(data, model_gamma)
         self.pathB_sparams = pathB_sparams
         self.pathC_sparams = pathC_sparams
 

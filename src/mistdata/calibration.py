@@ -5,20 +5,16 @@ High level tools for MIST calibration.
 from functools import cached_property
 import numpy as np
 from mistdata import AntennaS11, ReceiverS11
-from mistdata.cal_S11 import Keysight85033E
+
 
 class MISTCalibration:
 
     t_assumed_L = 300  # assumed temperature of load
     t_assumed_LNS = 2300  # assumed temperature of load + noise source
+    # default values for reflection coefficients of calibration standards
+    model_gamma = {"open": 1, "short": -1, "load": 0}
 
-    def __init__(
-        self,
-        mistdata,
-        cal_data,
-        cal_kit=Keysight85033E,
-        match_resistance=50,
-    ):
+    def __init__(self, mistdata, cal_data):
         """
         Class holding parameters and methods needed for MIST calibration,
         going from antenna PSD to sky temperature.
@@ -30,13 +26,8 @@ class MISTCalibration:
         cal_data : dict
             Dictionary containing the calibration data. The keys are
             'pathA_sparams', 'pathB_sparams', 'pathC_sparams', 'nw_params',
-            and 'C_params'. The values are the s parameters of the internal 
+            and 'C_params'. The values are the s parameters of the internal
             path, and the noise wave parameters with corrections.
-        cal_kit : class
-            Class to be instantiated for the calibration kit. See the
-            CalKit class in cal_S11.py for an example.
-        match_resistance : float
-            Resistance of the match in ohms used in the calibration kit.
 
         """
         self.mistdata = mistdata
@@ -51,19 +42,13 @@ class MISTCalibration:
 
         # s11 parameters
         ant_s11 = AntennaS11(
-            mistdata.dut_recin,
-            pathA_sparams,
-            cal_kit=cal_kit,
-            match_resistance=match_resistance,
+            mistdata.dut_recin, pathA_sparams, self.model_gamma
         )
         self.gamma_a = ant_s11.s11
         rec_s11 = ReceiverS11(
-            mistdata.dut_lna,
-            pathB_sparams,
-            pathC_sparams,
-            cal_kit=cal_kit,
-            match_resistance=match_resistance,
+            mistdata.dut_lna, pathB_sparams, pathC_sparams, self.model_gamma
         )
+        self.gamma_r = rec_s11.s11
 
     @cached_property
     def k_params(self):
@@ -78,14 +63,14 @@ class MISTCalibration:
             'k0', 'kU', 'kC', 'kS'.
         """
         # intermediate parameters
-        xa = 1 - np.abs(self.gamma_a)**2
-        xr = 1 - np.abs(self.gamma_r)**2
+        xa = 1 - np.abs(self.gamma_a) ** 2
+        xr = 1 - np.abs(self.gamma_r) ** 2
         F = np.sqrt(xr) / (1 - self.gamma_a * self.gamma_r)  # eq 12
         alpha = np.angle(self.gamma_a * F)  # eq 13
 
         _k_params = {}
-        _k_params["k0"] = xr / (xa * np.abs(F)**2)
-        kU = np.abs(self.gamma_a)**2 / xa
+        _k_params["k0"] = xr / (xa * np.abs(F) ** 2)
+        kU = np.abs(self.gamma_a) ** 2 / xa
         _k_params["kU"] = kU
         _k_params["kC"] = kU / np.abs(F) * np.cos(alpha)
         _k_params["kS"] = kU / np.abs(F) * np.sin(alpha)
