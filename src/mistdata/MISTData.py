@@ -32,7 +32,7 @@ def _assign_or_stack(var, array):
         var = array
     else:
         var = np.vstack((var, array))
-    return np.squeeze(var)
+    return var
 
 
 class MISTData:
