@@ -4,7 +4,7 @@ High level tools for MIST calibration.
 
 from functools import cached_property
 import numpy as np
-from mistdata import AntennaS11, ReceiverS11
+from .s11 import AntennaS11, ReceiverS11
 
 
 class MISTCalibration:

@@ -3,7 +3,7 @@ Tools for MIST S11 measurements.
 """
 
 import numpy as np
-from . import cal_S11
+from .cal_s11 import embed_sparams, de_embed_sparams, network_sparams
 
 
 class S11:
@@ -38,7 +38,7 @@ class S11:
         gamma_meas = np.array(
             [self.data.s11_open, self.data.s11_short, self.data.s11_match]
         )
-        return cal_S11.network_sparams(self.model_gamma, gamma_meas)
+        return cal_s11.network_sparams(self.model_gamma, gamma_meas)
 
     @property
     def cal_s11_internal(self):
@@ -55,7 +55,7 @@ class S11:
         """
         calibrated_s11 = {}
         for key, gamma in self.raw_s11.items():
-            calibrated_s11[key] = cal_S11.de_embed_sparams(
+            calibrated_s11[key] = cal_s11.de_embed_sparams(
                 self.vna_sparams, gamma
             )
 
@@ -119,7 +119,7 @@ class AntennaS11(S11):
         calibrated_s11 = {}
         # de-embed S-parameters of path A in the receiver
         for key, gamma in self.cal_s11_internal.items():
-            calibrated_s11[key] = cal_S11.de_embed_sparams(
+            calibrated_s11[key] = cal_s11.de_embed_sparams(
                 self.pathA_sparams, gamma
             )
 
@@ -181,8 +181,8 @@ class ReceiverS11(S11):
         # de-embed S-parameters of path B in the receiver and embed the
         # S-parameters of path C in the receiver
         for key, gamma in self.cal_s11_internal.items():
-            cal_gamma = cal_S11.de_embed_sparams(self.pathB_sparams, gamma)
-            cal_gamma = cal_S11.embed_sparams(self.pathC_sparams, cal_gamma)
+            cal_gamma = cal_s11.de_embed_sparams(self.pathB_sparams, gamma)
+            cal_gamma = cal_s11.embed_sparams(self.pathC_sparams, cal_gamma)
             calibrated_s11[key] = cal_gamma
 
         return calibrated_s11
