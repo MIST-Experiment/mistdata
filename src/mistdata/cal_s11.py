@@ -90,10 +90,12 @@ def network_sparams(gamma_true, gamma_meas):
     ----------
     gamma_true : array-like
         True reflection coefficients for the open, short, and match standards.
-        These are the unprimed quantities in Eq. 3.
+        These are the unprimed quantities in Eq. 3. First dimension should 
+        have length 3 (open, short, match).
     gamma_meas : array-like
         Measured reflection coefficients for the open, short, and match. These
-        are the primed quantities in Eq. 3.
+        are the primed quantities in Eq. 3. First dimension should have length
+        3 (open, short, match).
 
     Returns
     -------
@@ -102,13 +104,19 @@ def network_sparams(gamma_true, gamma_meas):
         the product of S12 and S21, not their individual values.
 
     """
-    gamma_true = np.array(gamma_true, dtype=complex).T  # (nfreq, 3)
-    gamma_meas = np.array(gamma_meas, dtype=complex).T
+    gamma_true = np.array(gamma_true, dtype=complex)
+    gamma_meas = np.array(gamma_meas, dtype=complex)
+    _orig_shape = gamma_true.shape
+    # collapse the frequency axis with any subsequent axes and transpose
+    gamma_true = np.reshape(gamma_true, (3, -1)).T  # shape is (..., 3)
+    gamma_meas = np.reshape(gamma_meas, (3, -1)).T
     # ``nfreq'' number of 3x3 matrices to invert in eq 3
     mat = np.dstack(
         ((np.ones_like(gamma_true), gamma_true, gamma_true * gamma_meas))
     )
-    sparams = np.linalg.solve(mat, gamma_meas[..., None]).T  # (3, nfreq)
+    # solve: mat is `a' (shape ..., 3, 3), gamma_meas is `b' (shape ..., 3)
+    sparams = np.linalg.solve(mat, gamma_meas)  # (..., 3)
+    sparams = np.reshape(sparams.T, _orig_shape)  # (3, ...)
     sparams[1] += sparams[0] * sparams[2]  # need to do this to get S12 * S21
     return np.squeeze(sparams)
 
