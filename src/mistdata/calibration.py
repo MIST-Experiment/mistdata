@@ -11,8 +11,6 @@ class MISTCalibration:
 
     t_assumed_L = 300  # assumed temperature of load
     t_assumed_LNS = 2300  # assumed temperature of load + noise source
-    # default values for reflection coefficients of calibration standards
-    model_gamma = {"open": 1, "short": -1, "load": 0}
 
     def __init__(self, mistdata, cal_data):
         """
@@ -41,13 +39,9 @@ class MISTCalibration:
         self.C_params = cal_data["C_params"]  # corrections to nw parameters
 
         # s11 parameters
-        ant_s11 = AntennaS11(
-            mistdata.dut_recin, pathA_sparams, self.model_gamma
-        )
+        ant_s11 = AntennaS11(mistdata.dut_recin, pathA_sparams)
         self.gamma_a = ant_s11.s11
-        rec_s11 = ReceiverS11(
-            mistdata.dut_lna, pathB_sparams, pathC_sparams, self.model_gamma
-        )
+        rec_s11 = ReceiverS11(mistdata.dut_lna, pathB_sparams, pathC_sparams)
         self.gamma_r = rec_s11.s11
 
     @cached_property
