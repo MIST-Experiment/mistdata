@@ -29,7 +29,7 @@ def impedance_to_gamma(Z, Z0):
     return (Z - Z0) / (Z + Z0)
 
 
-def calc_Z_off(Z0, delta_1ghz, f_Hz):
+def calc_Z_off(Z0, delta_1ghz, freq_Hz):
     """
     Calculate the impedance of the offset for the calibration standard. See
     M16, Eq. 20.
@@ -40,7 +40,7 @@ def calc_Z_off(Z0, delta_1ghz, f_Hz):
         Characteristic impedance.
     delta_1ghz : float
         One-way loss at 1 GHz.
-    f_Hz : float
+    freq_Hz : float
         Frequency in Hz.
 
     Returns
@@ -50,11 +50,11 @@ def calc_Z_off(Z0, delta_1ghz, f_Hz):
 
 
     """
-    x = delta_1ghz / (4 * np.pi * f_Hz) * np.sqrt(f_Hz / 1e9)
+    x = delta_1ghz / (4 * np.pi * freq_Hz) * np.sqrt(freq_Hz / 1e9)
     return Z0 + (1 - 1j) * x
 
 
-def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
+def calc_l_x_gamma(Z0, delta_1ghz, delay, freq_Hz):
     """
     Calculate the product of the length and propagation constant of the offset
     for the calibration standard. See M16, Eq. 21.
@@ -67,7 +67,7 @@ def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
         One-way loss at 1 GHz.
     delay : float
         One-way delay in seconds.
-    f_Hz : float
+    freq_Hz : float
         Frequency in Hz.
 
     Returns
@@ -76,8 +76,8 @@ def calc_l_x_gamma(Z0, delta_1ghz, delay, f_Hz):
         Product of length and propagation constant.
 
     """
-    x = delay * delta_1ghz / (2 * Z0) * np.sqrt(f_Hz / 1e9)
-    return 2j * np.pi * f_Hz * delay + (1 + 1j) * x
+    x = delay * delta_1ghz / (2 * Z0) * np.sqrt(freq_Hz / 1e9)
+    return 2j * np.pi * freq_Hz * delay + (1 + 1j) * x
 
 
 def network_sparams(gamma_true, gamma_meas):
@@ -90,7 +90,7 @@ def network_sparams(gamma_true, gamma_meas):
     ----------
     gamma_true : array-like
         True reflection coefficients for the open, short, and match standards.
-        These are the unprimed quantities in Eq. 3. First dimension should 
+        These are the unprimed quantities in Eq. 3. First dimension should
         have length 3 (open, short, match).
     gamma_meas : array-like
         Measured reflection coefficients for the open, short, and match. These
@@ -179,7 +179,7 @@ class CalStandard:
 
         Parameters
         ----------
-        f_Hz : float
+        freq_Hz : float
             Frequency in Hz.
         Z_ter : complex
             Impedance of termination.
@@ -212,14 +212,9 @@ class CalStandard:
         return impedance_to_gamma(self.Z_ter, self.Z0)
 
     @property
-    def gamma_off(self, f_Hz):
+    def gamma_off(self):
         """
         Reflection coefficient for the offset.
-
-        Parameters
-        ----------
-        f_Hz : float
-            Frequency in Hz.
 
         Returns
         -------
@@ -255,21 +250,21 @@ class CalStandard:
 
 class CalKit:
 
-    def __init__(self, f_Hz, Z0=50):
+    def __init__(self, freq_Hz, Z0=50):
         """
         Useful measured and derived values for a calibration kit. Note that all
         quantities are in SI units.
 
         Parameters
         ----------
-        f_Hz : float
+        freq_Hz : float
             Frequency in Hz.
         Z0 : float
             Characteristic impedance.
 
         """
         self.Z0 = Z0
-        self.f_Hz = f_Hz
+        self.freq_Hz = freq_Hz
 
     @property
     def omega(self):
@@ -294,8 +289,8 @@ class CalKit:
         CalStandard
 
         """
-        Z_off = calc_Z_off(self.Z0, delta_1ghz, self.f_Hz)
-        lxg = calc_l_x_gamma(self.Z0, delta_1ghz, delay, self.f_Hz)
+        Z_off = calc_Z_off(self.Z0, delta_1ghz, self.freq_Hz)
+        lxg = calc_l_x_gamma(self.Z0, delta_1ghz, delay, self.freq_Hz)
         return CalStandard(Z_ter, Z_off, lxg, Z0=self.Z0)
 
     def add_open(self, C_open, delta_1ghz, delay):

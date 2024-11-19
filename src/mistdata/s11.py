@@ -178,7 +178,7 @@ class ReceiverS11(S11):
 
         Returns
         -------
-        calibrated_s11 : ndarray 
+        calibrated_s11 : ndarray
             The calibrated S11 data.
 
         """
