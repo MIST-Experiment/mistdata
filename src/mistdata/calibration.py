@@ -22,27 +22,44 @@ class MISTCalibration:
         mistdata : MISTData
             MISTData object containing the data to be calibrated.
         cal_data : dict
-            Dictionary containing the calibration data. The keys are
-            'pathA_sparams', 'pathB_sparams', 'pathC_sparams', 'nw_params',
-            and 'C_params'. The values are the s parameters of the internal
-            path, and the noise wave parameters with corrections.
+            Dictionary containing the calibration data. Possible keys are
+            'gamma_a', 'gamma_r', 'pathA_sparams', 'pathB_sparams',
+            'pathC_sparams', 'nw_params', and 'C_params'. See notes.
+
+        Notes
+        -----
+        The calibration data dictionary can either directly contain the
+        calibrated S11 parameters of the antenna and receiver, with keys
+        'gamma_a' and 'gamma_r', or the s parameters of the internal paths
+        with keys 'pathA_sparams', 'pathB_sparams', and 'pathC_sparams'. If
+        the paths are given, the calibration will be done automatically.
+
+        The calibration data dictionary must also contain the noise wave
+        parameters with keys 'nw_params', and the corrections to the noise
+        wave parameters with keys 'C_params'.
 
         """
         self.mistdata = mistdata
-        self.spec = mistdata.spectrum
-        # s parameters of internal path
-        pathA_sparams = cal_data["pathA_sparams"]
-        pathB_sparams = cal_data["pathB_sparams"]
-        pathC_sparams = cal_data["pathC_sparams"]
+        self.spec = mistdata.spec
+
+        # s11 parameters
+        gamma_a = cal_data.get("gamma_a")
+        gamma_r = cal_data.get("gamma_r")
+        if gamma_a is None:
+            pathA_sparams = cal_data["pathA_sparams"]
+            gamma_a = AntennaS11(mistdata.dut_recin, pathA_sparams).s11
+        if gamma_r is None:
+            pathB_sparams = cal_data["pathB_sparams"]
+            pathC_sparams = cal_data["pathC_sparams"]
+            gamma_r = ReceiverS11(
+                mistdata.dut_lna, pathB_sparams, pathC_sparams
+            ).s11
+        self.gamma_a = gamma_a
+        self.gamma_r = gamma_r
+
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]
         self.C_params = cal_data["C_params"]  # corrections to nw parameters
-
-        # s11 parameters
-        ant_s11 = AntennaS11(mistdata.dut_recin, pathA_sparams)
-        self.gamma_a = ant_s11.s11
-        rec_s11 = ReceiverS11(mistdata.dut_lna, pathB_sparams, pathC_sparams)
-        self.gamma_r = rec_s11.s11
 
     @cached_property
     def k_params(self):
