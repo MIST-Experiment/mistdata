@@ -1,10 +1,10 @@
 """
-Tools for calculating noise wave parameters needed to calibrate MIST data. 
+Tools for calculating noise wave parameters needed to calibrate MIST data.
 Notations are following Monsalve et al. 2017 (M17), with some specific
 quantities from Monsalve et al. 2024 (M24).
 """
 
-from functools import cached_property, partial
+from functools import partial
 import numpy as np
 from scipy.optimize import curve_fit
 
@@ -50,12 +50,13 @@ def _nw_model(freq, coeffs, open_cal, short_cal):
     Tsin = np.polyval(Tsin_pars, freq)
     open_cal.nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
     short_cal.nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
-    T_open = self.open_cal.antenna_temp
-    T_short = self.short_cal.antenna_temp
+    T_open = open_cal.antenna_temp
+    T_short = short_cal.antenna_temp
     return np.concatenate((T_open, T_short))
 
+
 class NoiseWave:
-  
+
     # degree of the polynomial model for the noise wave parameters (from M17)
     nw_poly_deg = 7
 
@@ -81,7 +82,7 @@ class NoiseWave:
             MISTData object containing the short cable data
         pathA_sparams : array-like
             S-parameters of the path A in Figure 19 of M24. This is needed
-            to shift the reference plane of the S11-measurements of the 
+            to shift the reference plane of the S11-measurements of the
             calibrators connected to the receiver input.
         gamma_r : complex
             Reflection coefficient looking in to the receiver input.
@@ -94,13 +95,11 @@ class NoiseWave:
             "pathA_sparams": pathA_sparams,
             "gamma_r": gamma_r,
             "nw_params": nw_params,
-            "C_params": C_params
+            "C_params": C_params,
         }
         t_LNS = 350  # assumed noise temperature of load + noise source
-        
-        self.hot_cal = MISTCalibration(
-            hot_data, cal_data, t_assumed_LNS=t_LNS
-        )
+
+        self.hot_cal = MISTCalibration(hot_data, cal_data, t_assumed_LNS=t_LNS)
         self.ambient_cal = MISTCalibration(
             ambient_data, cal_data, t_assumed_LNS=t_LNS
         )
@@ -112,7 +111,7 @@ class NoiseWave:
         )
 
         self.freq = self.open_cal.freq
-        
+
         # physical temperature of the calibrators XXX
         self.T_hot = None
         self.T_amb = None
@@ -146,7 +145,7 @@ class NoiseWave:
         self.ambient_cal.C_params = C_next
         self.open_cal.C_params = C_next
         self.short_cal.C_params = C_next
-    
+
     def _update_nw(self):
         """
         Use measurements of open and short cables to fit the noise wave
@@ -168,7 +167,7 @@ class NoiseWave:
         Tcos = np.polyval(Tcos_pars, self.freq)
         Tsin = np.polyval(Tsin_pars, self.freq)
         nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
-        
+
         self.hot_cal.nw_params = nw_params
         self.ambient_cal.nw_params = nw_params
         self.open_cal.nw_params = nw_params
