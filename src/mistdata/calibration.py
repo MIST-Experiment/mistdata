@@ -9,10 +9,9 @@ from .s11 import AntennaS11, ReceiverS11
 
 class MISTCalibration:
 
-    t_assumed_L = 300  # assumed temperature of load
-    t_assumed_LNS = 2300  # assumed temperature of load + noise source
-
-    def __init__(self, mistdata, cal_data):
+    def __init__(
+        self, mistdata, cal_data, t_assumed_L=300, t_assumed_LNS=2300
+    ):
         """
         Class holding parameters and methods needed for MIST calibration,
         going from antenna PSD to sky temperature.
@@ -25,6 +24,13 @@ class MISTCalibration:
             Dictionary containing the calibration data. Possible keys are
             'gamma_a', 'gamma_r', 'pathA_sparams', 'pathB_sparams',
             'pathC_sparams', 'nw_params', and 'C_params'. See notes.
+        t_assumed_L : float
+            Assumed temperature of the load in Kelvin. Default is 300 K.
+        t_assumed_LNS : float
+            Assumed temperature of the load + noise source in Kelvin. Default
+            is 2300 K, which is the case for MIST in the field. When
+            estimating noise wave parameters, a value of 350 K is used; see
+            Monsalve et al. 2017 (section 3.2).
 
         Notes
         -----
@@ -41,14 +47,18 @@ class MISTCalibration:
         """
         self.mistdata = mistdata
         self.spec = mistdata.spec
+        self.t_assumed_L = t_assumed_L
+        self.t_assumed_LNS = t_assumed_LNS
 
         # s11 parameters
-        gamma_a = cal_data.get("gamma_a")
-        gamma_r = cal_data.get("gamma_r")
-        if gamma_a is None:
+        try:
+            gamma_a = cal_data["gamma_a"]
+        except KeyError:
             pathA_sparams = cal_data["pathA_sparams"]
             gamma_a = AntennaS11(mistdata.dut_recin, pathA_sparams).s11
-        if gamma_r is None:
+        try:
+            gamma_r = cal_data["gamma_r"]
+        except KeyError:
             pathB_sparams = cal_data["pathB_sparams"]
             pathC_sparams = cal_data["pathC_sparams"]
             gamma_r = ReceiverS11(
@@ -87,7 +97,7 @@ class MISTCalibration:
         _k_params["kS"] = kU / np.abs(F) * np.sin(alpha)
         return _k_params
 
-    @cached_property
+    @property
     def receiver_gain(self):
         """
         Calculate the receiver gain of the receiver, given in Equation 6 of
@@ -104,7 +114,7 @@ class MISTCalibration:
         C1 = self.C_params["C1"]
         return pdiff / (k0 * C1 * tdiff)
 
-    @cached_property
+    @property
     def receiver_temp(self):
         """
         Calculate the receiver temperature of the receiver, given in
@@ -122,7 +132,7 @@ class MISTCalibration:
         S = self.k_params["kS"] * self.nw_params["TS"]
         return t1 - t2 + U + C + S
 
-    @cached_property
+    @property
     def antenna_temp(self):
         """
         Calculate the antenna temperature of the antenna, given in
@@ -130,6 +140,7 @@ class MISTCalibration:
         """
         return self.spec.psd_antenna / self.receiver_gain - self.receiver_temp
 
+    # XXX belongs somewhere else, probably in MISTData
     def calc_Tsky(self, Tphys=0, eta_rad=1, eta_beam=1, eta_balun=1):
         """
         Calculate the sky temperature given the radiation efficiency,
