@@ -1,14 +1,15 @@
 from datetime import datetime
 from typing import List, Union
-
 import numpy as np
+from scipy.optimize import curve_fit
 import skyfield.api as sf
 
 SF_TS = sf.load.timescale()
 
+
 def add_sort_time_pair(arr1, time1, arr2, time2):
     """
-    Combines two arrays and corresponding time arrays, sorts them based on time,
+    Combine two arrays and corresponding time arrays, sort them based on time,
     and returns the sorted arrays and time arrays.
     """
     time = combine_times(time1, time2)
@@ -19,9 +20,11 @@ def add_sort_time_pair(arr1, time1, arr2, time2):
 
 def add_sort_spec_pair(spec1, time1, spec2, time2):
     """
-    This method takes in two sets of spectral data and their corresponding observation times, and combines them into
-    a single set of spectral data and observation times. If the observation times of the second set end before the
-    observation times of the first set start, the order of the sets will be swapped before combining.
+    This method takes in two sets of spectral data and their corresponding
+    observation times, and combines them into a single set of spectral data and
+    observation times. If the observation times of the second set end before
+    the observation times of the first set start, the order of the sets will be
+    swapped before combining.
     """
     if time2[-1] < time1[0]:
         time1, time2 = time2, time1
@@ -32,9 +35,11 @@ def add_sort_spec_pair(spec1, time1, spec2, time2):
     # return spec[idxs], [time[i] for i in idxs]
     return spec, time
 
+
 def dtlist2strlist(dates: Union[datetime, List[datetime]]):
     """
-    Converts a list of datetime objects to a list of ISO-formatted string representations.
+    Convert a list of datetime objects to a list of ISO-formatted string
+    representations.
     """
     if not isinstance(dates, List):
         dates = [dates]
@@ -43,7 +48,8 @@ def dtlist2strlist(dates: Union[datetime, List[datetime]]):
 
 def hdfdt2dtlist(dates):
     """
-    Converts an array of dates in string ISO format to a list of datetime objects.
+    Convert an array of dates in string ISO format to a list of datetime
+    objects.
     """
     strdates = [datetime.fromisoformat(dt) for dt in dates.asstr()[()]]
     if len(strdates) == 1:
@@ -85,3 +91,83 @@ def dt2lst(dt: datetime, lon: float):
     earth_loc = sf.wgs84.latlon(90, lon)
     return earth_loc.lst_hours_at(t)
 
+
+def fourier_series(x, params):
+    """
+    Evaluate a Fourier series at the given x values.
+
+    Parameters
+    ----------
+    x : array-like
+        The x values to evaluate the Fourier series at.
+    params : array-like
+        The parameters of the Fourier series. The first element is the
+        constant term, the next N elements are the cosine coefficients, and
+        the last N elements are the sine coefficients.
+
+    Returns
+    -------
+    y : ndarray
+        The values of the Fourier series at the given x values.
+
+    """
+    y = params[0]
+    pcos, psin = np.split(params[1:], 2)
+    N = pcos.size
+    for i in range(N):
+        y += pcos[i] * np.cos((i + 1) * x) + psin[i] * np.sin((i + 1) * x)
+    return y
+
+
+def fit_fourier(
+    xdata, ydata, deg, xmin=None, xmax=None, complex_data=True, **kwargs
+):
+    """
+    Fit a Fourier series to the given data.
+
+    Parameters
+    ----------
+    xdata : array-like
+        The x data.
+    ydata : array-like
+        The y data. Must have the same length as xdata.
+    deg : int
+        The degree of the Fourier series to fit.
+    xmin : float
+        The minimum x value to use in the fit.
+    xmax : float
+        The maximum x value to use in the fit.
+    complex_data : bool
+        Whether the data is complex. If True, the Fourier series will be fit
+        to the real and imaginary parts of the data separately.
+    kwargs : dict
+        Additional keyword arguments to pass to scipy.optimize.curve_fit.
+
+    Returns
+    -------
+    popt : ndarray
+        The optimized parameters of the Fourier series, with length 2*deg + 1
+        in order of constant term, the cosine coefficients, and the sine
+        coefficients.
+
+    """
+    xdata = np.array(xdata)
+    ydata = np.array(ydata)
+    p0 = kwargs.pop("p0", np.zeros(2 * deg + 1))
+    if np.size(p0) != 2 * deg + 1:
+        raise ValueError("p0 must have length 2*deg + 1")
+    if xmin:
+        xdata = xdata[xdata >= xmin]
+        ydata = ydata[xdata >= xmin]
+    if xmax:
+        xdata = xdata[xdata <= xmax]
+        ydata = ydata[xdata <= xmax]
+    if complex_data:
+        xdata = np.concatenate((xdata, xdata))
+        ydata = np.concatenate((ydata.real, ydata.imag))
+        p0 = np.concatenate((p0.real, p0.imag))
+    popt = curve_fit(fourier_series, xdata, ydata, p0=p0, **kwargs)[0]
+    if complex_data:
+        pr, pi = np.split(popt, 2)
+        popt = pr + 1j * pi
+    return popt
