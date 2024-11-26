@@ -11,7 +11,7 @@ class S11:
     def __init__(self, data):
         """
         Base class for S11 measurements. End users should use either
-        AntennaS11 or ReceiverS11.
+        AntennaS11, ReceiverS11 or CalStandardS11.
 
         Parameters
         ----------
