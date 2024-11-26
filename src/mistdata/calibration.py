@@ -5,6 +5,7 @@ High level tools for MIST calibration.
 from functools import cached_property
 import numpy as np
 from .s11 import AntennaS11, ReceiverS11
+from .utils import fourier_series, fit_fourier
 
 
 class MISTCalibration:
@@ -28,9 +29,7 @@ class MISTCalibration:
             Assumed temperature of the load in Kelvin. Default is 300 K.
         t_assumed_LNS : float
             Assumed temperature of the load + noise source in Kelvin. Default
-            is 2300 K, which is the case for MIST in the field. When
-            estimating noise wave parameters, a value of 350 K is used; see
-            Monsalve et al. 2017 (section 3.2).
+            is 2300 K.
 
         Notes
         -----
@@ -64,8 +63,26 @@ class MISTCalibration:
             gamma_r = ReceiverS11(
                 mistdata.dut_lna, pathB_sparams, pathC_sparams
             ).s11
-        self.gamma_a = gamma_a
-        self.gamma_r = gamma_r
+        # fit the s11 parameters to a fourier series over 25-105 MHz
+        deg = 5
+        fmin = 25
+        fmax = 105
+        s11_freq = mistdata.dut_recin.s11_freq
+        ydata = np.concatenate(
+            (gamma_a["antenna"].real, gamma_a["antenna"].imag)
+        )
+        self._gamma_a = gamma_a["antenna"]
+        popt = fit_fourier(
+            s11_freq, ydata, deg, xmin=fmin, xmax=fmax, complex_data=True
+        )
+        self.gamma_a = fourier_series(mistdata.spec.freq, popt)
+
+        ydata = np.concatenate((gamma_r.real, gamma_r.imag))
+        self._gamma_r = gamma_r
+        popt = fit_fourier(
+            s11_freq, ydata, deg, xmin=fmin, xmax=fmax, complex_data=True
+        )
+        self.gamma_r = fourier_series(mistdata.spec.freq, popt)
 
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]
