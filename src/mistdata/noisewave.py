@@ -97,26 +97,30 @@ class NoiseWave:
             "nw_params": nw_params,
             "C_params": C_params,
         }
-        t_LNS = 350  # assumed noise temperature of load + noise source
+        # assumed physical temperature of the calibrators (from M24)
+        t_L = 300  # assumed physical temperature of the load
+        t_LNS = 2300  # assumed noise temperature of load + noise source
 
-        self.hot_cal = MISTCalibration(hot_data, cal_data, t_assumed_LNS=t_LNS)
+        self.hot_cal = MISTCalibration(
+            hot_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
+        )
         self.ambient_cal = MISTCalibration(
-            ambient_data, cal_data, t_assumed_LNS=t_LNS
+            ambient_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
         )
         self.open_cal = MISTCalibration(
-            open_data, cal_data, t_assumed_LNS=t_LNS
+            open_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
         )
         self.short_cal = MISTCalibration(
-            short_data, cal_data, t_assumed_LNS=t_LNS
+            short_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
         )
 
-        self.freq = self.open_cal.freq
+        self.freq = open_data.spec.freq
 
         # physical temperature of the calibrators XXX
-        self.T_hot = None
-        self.T_amb = None
-        self.T_open = None
-        self.T_short = None
+        self.T_hot = 400  # XXX guess
+        self.T_amb = 300  # XXX guess
+        self.T_open = 300  # XXX guess
+        self.T_short = 300  # XXX guess
 
     @property
     def C_params(self):
