@@ -237,7 +237,7 @@ class CalStandard:
 
         """
 
-        exp = np.exp(-2j * self.l_x_gamma)
+        exp = np.exp(-2 * self.l_x_gamma)
         # numerator
         num1 = self.gamma_off * (1 - exp) + self.gamma_ter * exp
         num2 = self.gamma_off**2 * self.gamma_ter
