@@ -10,6 +10,12 @@ from .utils import fourier_series, fit_fourier
 
 class MISTCalibration:
 
+    fourier_deg = 55  # degree of fourier series fit to s11 measurements
+    #fmin = 25  # minimum frequency for s11 fit
+    #fmax = 105  # maximum frequency for s11 fit
+    fmin = None
+    fmax = None
+
     def __init__(
         self, mistdata, cal_data, t_assumed_L=300, t_assumed_LNS=2300
     ):
@@ -64,25 +70,28 @@ class MISTCalibration:
                 mistdata.dut_lna, pathB_sparams, pathC_sparams
             ).s11
         # fit the s11 parameters to a fourier series over 25-105 MHz
-        deg = 5
-        fmin = 25
-        fmax = 105
         s11_freq = mistdata.dut_recin.s11_freq
-        ydata = np.concatenate(
-            (gamma_a["antenna"].real, gamma_a["antenna"].imag)
-        )
         self._gamma_a = gamma_a["antenna"]
         popt = fit_fourier(
-            s11_freq, ydata, deg, xmin=fmin, xmax=fmax, complex_data=True
+            s11_freq,
+            gamma_a["antenna"],
+            self.fourier_deg,
+            xmin=self.fmin,
+            xmax=self.fmax,
+            complex_data=True,
         )
-        self.gamma_a = fourier_series(mistdata.spec.freq, popt)
+        self.gamma_a = fourier_series(mistdata.spec.freq, *popt)
 
-        ydata = np.concatenate((gamma_r.real, gamma_r.imag))
         self._gamma_r = gamma_r
         popt = fit_fourier(
-            s11_freq, ydata, deg, xmin=fmin, xmax=fmax, complex_data=True
+            s11_freq,
+            gamma_r,
+            self.fourier_deg,
+            xmin=self.fmin,
+            xmax=self.fmax,
+            complex_data=True,
         )
-        self.gamma_r = fourier_series(mistdata.spec.freq, popt)
+        self.gamma_r = fourier_series(mistdata.spec.freq, *popt)
 
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]

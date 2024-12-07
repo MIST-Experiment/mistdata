@@ -91,8 +91,14 @@ def dt2lst(dt: datetime, lon: float):
     earth_loc = sf.wgs84.latlon(90, lon)
     return earth_loc.lst_hours_at(t)
 
+def x_transform_fourier(x):
+    """
+    Transform x values to the range [0, 1] for Fourier series fitting.
+    
+    """
+    return (x - np.min(x)) / (np.max(x) - np.min(x))
 
-def fourier_series(x, params):
+def fourier_series(x, *params):
     """
     Evaluate a Fourier series at the given x values.
 
@@ -111,11 +117,14 @@ def fourier_series(x, params):
         The values of the Fourier series at the given x values.
 
     """
+    params = np.array(params)
     y = params[0]
     pcos, psin = np.split(params[1:], 2)
     N = pcos.size
+    x = x_transform_fourier(x)
     for i in range(N):
-        y += pcos[i] * np.cos((i + 1) * x) + psin[i] * np.sin((i + 1) * x)
+        arg = (i + 1) * x
+        y += pcos[i] * np.cos(arg) + psin[i] * np.sin(arg)
     return y
 
 
@@ -157,17 +166,19 @@ def fit_fourier(
     if np.size(p0) != 2 * deg + 1:
         raise ValueError("p0 must have length 2*deg + 1")
     if xmin:
-        xdata = xdata[xdata >= xmin]
         ydata = ydata[xdata >= xmin]
+        xdata = xdata[xdata >= xmin]
     if xmax:
-        xdata = xdata[xdata <= xmax]
         ydata = ydata[xdata <= xmax]
+        xdata = xdata[xdata <= xmax]
     if complex_data:
-        xdata = np.concatenate((xdata, xdata))
-        ydata = np.concatenate((ydata.real, ydata.imag))
-        p0 = np.concatenate((p0.real, p0.imag))
-    popt = curve_fit(fourier_series, xdata, ydata, p0=p0, **kwargs)[0]
-    if complex_data:
-        pr, pi = np.split(popt, 2)
+        pr = curve_fit(
+            fourier_series, xdata, ydata.real, p0=p0.real, **kwargs
+        )[0]
+        pi = curve_fit(
+            fourier_series, xdata, ydata.imag, p0=p0.imag, **kwargs
+        )[0]
         popt = pr + 1j * pi
+    else:
+        popt = curve_fit(fourier_series, xdata, ydata, p0=p0, **kwargs)[0]
     return popt
