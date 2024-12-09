@@ -3,6 +3,7 @@ import numpy as np
 
 from mistdata import utils
 
+
 def test_add_sort_time_pair():
     t1 = datetime(2024, 10, 20, 23, 47, 37)
     t2 = datetime(2024, 10, 20, 8, 48, 20)

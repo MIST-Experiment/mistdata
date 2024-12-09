@@ -11,8 +11,8 @@ from .utils import fourier_series, fit_fourier
 class MISTCalibration:
 
     fourier_deg = 55  # degree of fourier series fit to s11 measurements
-    #fmin = 25  # minimum frequency for s11 fit
-    #fmax = 105  # maximum frequency for s11 fit
+    # fmin = 25  # minimum frequency for s11 fit
+    # fmax = 105  # maximum frequency for s11 fit
     fmin = None
     fmax = None
 

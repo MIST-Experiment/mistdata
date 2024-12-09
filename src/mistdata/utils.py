@@ -91,12 +91,14 @@ def dt2lst(dt: datetime, lon: float):
     earth_loc = sf.wgs84.latlon(90, lon)
     return earth_loc.lst_hours_at(t)
 
+
 def x_transform_fourier(x):
     """
     Transform x values to the range [0, 1] for Fourier series fitting.
-    
+
     """
     return (x - np.min(x)) / (np.max(x) - np.min(x))
+
 
 def fourier_series(x, *params):
     """
