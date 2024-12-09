@@ -26,7 +26,11 @@ def impedance_to_gamma(Z, Z0):
         Reflection coefficient.
 
     """
-    return (Z - Z0) / (Z + Z0)
+    gamma = np.atleast_1d((Z - Z0) / (Z + Z0))
+    gamma[np.where(np.isinf(Z))] = 1
+    if np.isscalar(Z):
+        return gamma[0]
+    return gamma
 
 
 def calc_Z_off(Z0, delta_1ghz, freq_Hz):
