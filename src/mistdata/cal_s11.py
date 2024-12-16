@@ -381,7 +381,8 @@ class Keysight85033E(CalKit):
         short_loss = 2.36e9
 
         # load / match standard
-        match_delay = 38e-12  # 38 ps
+        match_delay = 38e-12  # 38 ps (same as Raul)
+        # match_delay = 38.8e-12  # 38.8 ps from M16
         match_loss = 2.3e9
 
         super().__init__(freq_Hz, Z0=Z0)
