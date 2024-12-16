@@ -2,8 +2,10 @@
 High level tools for MIST calibration.
 """
 
+from copy import deepcopy
 from functools import cached_property
 import numpy as np
+import pickle
 from .s11 import AntennaS11, ReceiverS11
 from .utils import fourier_series, fit_fourier
 
@@ -11,10 +13,9 @@ from .utils import fourier_series, fit_fourier
 class MISTCalibration:
 
     fourier_deg = 55  # degree of fourier series fit to s11 measurements
-    # fmin = 25  # minimum frequency for s11 fit
-    # fmax = 105  # maximum frequency for s11 fit
-    fmin = None
-    fmax = None
+    # frequency range to do calibration over
+    fmin = 23
+    fmax = 107
 
     def __init__(
         self, mistdata, cal_data, t_assumed_L=300, t_assumed_LNS=2300
@@ -41,7 +42,7 @@ class MISTCalibration:
         -----
         The calibration data dictionary can either directly contain the
         calibrated S11 parameters of the antenna and receiver, with keys
-        'gamma_a' and 'gamma_r', or the s parameters of the internal paths
+        'gamma_a' and 'gamma_r', or the S-parameters of the internal paths
         with keys 'pathA_sparams', 'pathB_sparams', and 'pathC_sparams'. If
         the paths are given, the calibration will be done automatically.
 
@@ -49,53 +50,100 @@ class MISTCalibration:
         parameters with keys 'nw_params', and the corrections to the noise
         wave parameters with keys 'C_params'.
 
+        Note that all the data in cal_data should have a frequency axis
+        that is the same as the S11 frequency axis in mistdata, that is,
+        mistdata.dut_recin.s11_freq.
+
         """
-        self.mistdata = mistdata
-        self.spec = mistdata.spec
+        self.mistdata = deepcopy(mistdata)
+        all_s11_freq = self.mistdata.dut_recin.s11_freq  # before cut
+        self.mistdata.cut_freq(self.fmin, self.fmax)
+        self.spec = self.mistdata.spec
         self.t_assumed_L = t_assumed_L
         self.t_assumed_LNS = t_assumed_LNS
+
+        self.nfreq = self.mistdata.spec.freq.size
 
         # s11 parameters
         try:
             gamma_a = cal_data["gamma_a"]
         except KeyError:
             pathA_sparams = cal_data["pathA_sparams"]
-            gamma_a = AntennaS11(mistdata.dut_recin, pathA_sparams).s11
+            gamma_a = AntennaS11(self.mistdata.dut_recin, pathA_sparams).s11
         try:
             gamma_r = cal_data["gamma_r"]
         except KeyError:
             pathB_sparams = cal_data["pathB_sparams"]
             pathC_sparams = cal_data["pathC_sparams"]
             gamma_r = ReceiverS11(
-                mistdata.dut_lna, pathB_sparams, pathC_sparams
+                self.mistdata.dut_lna, pathB_sparams, pathC_sparams
             ).s11
-        # fit the s11 parameters to a fourier series over 25-105 MHz
-        s11_freq = mistdata.dut_recin.s11_freq
-        self._gamma_a = gamma_a["antenna"]
-        popt = fit_fourier(
-            s11_freq,
-            gamma_a["antenna"],
-            self.fourier_deg,
-            xmin=self.fmin,
-            xmax=self.fmax,
-            complex_data=True,
-        )
-        self.gamma_a = fourier_series(mistdata.spec.freq, *popt)
+        s11_freq = self.mistdata.dut_recin.s11_freq
+        _gamma_a = np.atleast_2d(gamma_a["antenna"])  # (batch, freq)
+
+        # apply frequency cut to gamma_a and gamma_r if necessary
+        mask = (all_s11_freq >= self.fmin) & (all_s11_freq <= self.fmax)
+        if _gamma_a.shape[-1] == all_s11_freq.size:  # cuts not applied yet
+            _gamma_a = _gamma_a[:, mask]
+        if gamma_r.shape[-1] == all_s11_freq.size:
+            gamma_r = gamma_r[mask]
+
+        # fit the s11 parameters to a fourier series
+        self._gamma_a = _gamma_a
+        self.nspec = _gamma_a.shape[0]
+        self.gamma_a = np.empty((self.nspec, self.nfreq), dtype=complex)
+        for i, gamma in enumerate(_gamma_a):
+            popt = fit_fourier(
+                s11_freq, gamma, self.fourier_deg, complex_data=True
+            )
+            self.gamma_a[i] = fourier_series(self.mistdata.spec.freq, *popt)
 
         self._gamma_r = gamma_r
         popt = fit_fourier(
-            s11_freq,
-            gamma_r,
-            self.fourier_deg,
-            xmin=self.fmin,
-            xmax=self.fmax,
-            complex_data=True,
+            s11_freq, gamma_r, self.fourier_deg, complex_data=True
         )
-        self.gamma_r = fourier_series(mistdata.spec.freq, *popt)
+        self.gamma_r = fourier_series(self.mistdata.spec.freq, *popt)
 
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]
         self.C_params = cal_data["C_params"]  # corrections to nw parameters
+
+        # there's one VNA measurement per file so we need to broadcast
+        shape = (self.nspec, -1, self.nfreq)
+        self.spec.psd_noise_source.shape = shape
+        self.spec.psd_ambient.shape = shape
+        self.spec.psd_antenna.shape = shape
+        self.gamma_a.shape = shape
+
+    def save(self, filename):
+        """
+        Save the calibration object to a pickle file.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the file to save the calibration object to.
+        """
+        with open(filename, "wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls, filename):
+        """
+        Load a calibration object from a pickle file.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the file to load the calibration object from.
+
+        Returns
+        -------
+        MISTCalibration
+            Loaded calibration object.
+        """
+        with open(filename, "rb") as f:
+            return pickle.load(f)
 
     @cached_property
     def k_params(self):
@@ -121,6 +169,8 @@ class MISTCalibration:
         _k_params["kU"] = kU
         _k_params["kC"] = kU / np.abs(F) * np.cos(alpha)
         _k_params["kS"] = kU / np.abs(F) * np.sin(alpha)
+        _k_params["F"] = F
+        _k_params["alpha"] = alpha
         return _k_params
 
     @property
