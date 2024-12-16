@@ -37,7 +37,8 @@ def _assign_or_stack(var, array):
 
 class MISTData:
     """
-    The MISTData class represents the MIST data with information about DUTRecIn, DUTLNA, and Spectrum.
+    The MISTData class represents the MIST data with information about the
+    DUTRecIn, DUTLNA, and Spectrum.
 
     Attributes:
     - dut_recin (DUTRecIn): The DUTRecIn object.
@@ -45,23 +46,29 @@ class MISTData:
     - spec (Spectrum): The Spectrum object.
 
     Methods:
-    - __getitem__(self, item): Returns a new MISTData object with the specified slice of spec.
+    - __getitem__(self, item): Returns a new MISTData object with the specified
+    slice of spec.
     - save(self, saveto: str = "data.mist"): Save the model to an HDF file.
-    - load(cls, path: str): Load a model from a file and return the recovered MISTData object.
-    - from_list(obj_list) -> "MISTData": Returns a new MISTData object by adding all the elements in the obj_list.
-    - read_raw_many(cls, files: List[str], nproc=None): Read raw data from multiple files and return a MISTData object.
-    - read_raw(cls, path: str): Read raw data from a file and return a MISTData object.
-    - __add__(self, other): Adds two MISTData objects and returns a new MISTData object.
+    - load(cls, path: str): Load a model from a file and return the recovered
+    MISTData object.
+    - from_list(obj_list) -> "MISTData": Returns a new MISTData object by
+    adding all the elements in the obj_list.
+    - read_raw_many(cls, files: List[str], nproc=None): Read raw data from
+    multiple files and return a MISTData object.
+    - read_raw(cls, path: str): Read raw data from a file and return a MISTData
+    object.
+    - __add__(self, other): Adds two MISTData objects and returns a new
+    MISTData object.
     - __eq__(self, other): Checks if two MISTData objects are equal.
-    - plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)): Plots the RFI (Radio Frequency Interference) using the
-      MISTData object.
+    - plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)): Plots the RFI
+    (Radio Frequency Interference) using the MISTData object.
     """
 
     def __init__(
-            self,
-            dut_recin: DUTRecIn = DUTRecIn(),
-            dut_lna: DUTLNA = DUTLNA(),
-            spec: Spectrum = Spectrum(),
+        self,
+        dut_recin: DUTRecIn = DUTRecIn(),
+        dut_lna: DUTLNA = DUTLNA(),
+        spec: Spectrum = Spectrum(),
     ):
         self.dut_recin = dut_recin
         self.dut_lna = dut_lna
@@ -71,7 +78,7 @@ class MISTData:
         return MISTData(
             dut_recin=self.dut_recin,
             dut_lna=self.dut_lna,
-            spec=self.spec[item.start:item.stop:item.step],
+            spec=self.spec[item],
         )
 
     def save(self, saveto: str = "data.mist"):
@@ -116,8 +123,8 @@ class MISTData:
         Reads multiple raw data files and returns a list of MISTData objects.
 
         :param file: A path or list of file paths to the raw data files.
-        :param nproc: The number of processes to use for parallel processing. Default is None, which means no parallel
-                      processing.
+        :param nproc: The number of processes to use for parallel processing.
+        Default is None, which means no parallel processing.
         :return: A list of MISTData objects.
 
         Example usage:
@@ -136,7 +143,7 @@ class MISTData:
                             zip(itertools.repeat(MISTData.read_raw), file),
                         ),
                         total=len(file),
-                        desc="Reading data files"
+                        desc="Reading data files",
                     )
                 )
                 return datafiles
@@ -146,7 +153,8 @@ class MISTData:
         """
         :class: MISTData
 
-        The `read_raw` method reads raw data from a file and constructs an instance of the `MISTData` class.
+        The `read_raw` method reads raw data from a file and constructs an
+        instance of the `MISTData` class.
 
         :param path: The path to the file containing the raw data.
         :return: An instance of the `MISTData` class.
@@ -180,7 +188,9 @@ class MISTData:
                 for line in fin:
                     line = line.decode("utf-8")
                     line = line.strip().split()
-                    line_array = np.array([complex(i.replace("+-", "-")) for i in line])
+                    line_array = np.array(
+                        [complex(i.replace("+-", "-")) for i in line]
+                    )
                     # iteration = int(np.real(line_array[0]))
                     case = int(np.real(line_array[7]))
 
@@ -244,11 +254,17 @@ class MISTData:
                 spec_therm_ambient_load = spec_therm[:, 10].real
                 spec_therm_back_end = spec_therm[:, 13].real
                 spec_t_antenna = spec_antenna[:, 8:].real
-                spec_t_antenna_time = [_extract_time(arr) for arr in spec_antenna]
+                spec_t_antenna_time = [
+                    _extract_time(arr) for arr in spec_antenna
+                ]
                 spec_t_ambient = spec_ambient[:, 8:].real
-                spec_t_ambient_time = [_extract_time(arr) for arr in spec_ambient]
+                spec_t_ambient_time = [
+                    _extract_time(arr) for arr in spec_ambient
+                ]
                 spec_t_noise_source = spec_noise_source[:, 8:].real
-                spec_t_noise_source_time = [_extract_time(arr) for arr in spec_noise_source]
+                spec_t_noise_source_time = [
+                    _extract_time(arr) for arr in spec_noise_source
+                ]
             except IndexError:
                 # raise RuntimeError(f"Cannot read_raw file {path}")
                 return None
@@ -300,20 +316,44 @@ class MISTData:
 
     def __eq__(self, other):
         if (
-                self.dut_recin == other.dut_recin
-                and self.dut_lna == other.dut_lna
-                and self.spec == other.spec
+            self.dut_recin == other.dut_recin
+            and self.dut_lna == other.dut_lna
+            and self.spec == other.spec
         ):
             return True
         return False
 
+    def cut_freq(self, freq_min=None, freq_max=None, inplace=True):
+        """
+        Cut the frequency range of the Spectrum, DUTRecIn, and DUTLNA
+        objects.
+
+        :param freq_min: The minimum frequency value in MHz.
+        :param freq_max: The maximum frequency value in MHz.
+        :param inplace: If True, the current object is modified. If False, a
+        new object is returned.
+
+        :return: The modified MISTData object if inplace is False.
+        """
+        if inplace:
+            obj = self
+        else:
+            obj = copy.deepcopy(self)
+        obj.spec.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        obj.dut_recin.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        obj.dut_lna.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        if not inplace:
+            return obj
+
     def plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)):
         """
-        Plots RFI removal steps for MISTData object. Based on https://arxiv.org/abs/2012.06521 paper.
+        Plots RFI removal steps for MISTData object. Based on
+        https://arxiv.org/abs/2012.06521 paper.
 
         :param thresh: The threshold for flagging RFI, default is 5.
         :param med_win: The window size for median filter, default is 10.
-        :param ax1_lims: The limits for the first subplot, default is (110, 114).
+        :param ax1_lims: The limits for the first subplot, default is
+        (110, 114).
 
         :return: The matplotlib Figure object showing the RFI removal steps.
         """
