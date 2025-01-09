@@ -12,13 +12,18 @@ from .utils import fourier_series, fit_fourier
 
 class MISTCalibration:
 
-    fourier_deg = 55  # degree of fourier series fit to s11 measurements
     # frequency range to do calibration over
     fmin = 23
     fmax = 107
 
     def __init__(
-        self, mistdata, cal_data, t_assumed_L=300, t_assumed_LNS=2300
+        self,
+        mistdata,
+        cal_data,
+        t_assumed_L=300,
+        t_assumed_LNS=2300,
+        fit_model="dpss",
+        fit_nterms=10,
     ):
         """
         Class holding parameters and methods needed for MIST calibration,
@@ -37,6 +42,11 @@ class MISTCalibration:
         t_assumed_LNS : float
             Assumed temperature of the load + noise source in Kelvin. Default
             is 2300 K.
+        fit_model : str
+            Which model to fit S11 spectra to. Default is 'dpss'. Options are
+            'dpss' and 'fourier'. If None, no fitting is done.
+        fit_nterms : int
+            Number of terms to use in the fit. Default is 10.
 
         Notes
         -----
@@ -56,7 +66,9 @@ class MISTCalibration:
 
         """
         self.mistdata = deepcopy(mistdata)
-        all_s11_freq = self.mistdata.dut_recin.s11_freq  # before cut
+        # frequency cut
+        self.all_s11_freq = self.mistdata.dut_recin.s11_freq  # before cut
+        self.all_spec_freq = self.mistdata.spec.freq  # before cut
         self.mistdata.cut_freq(self.fmin, self.fmax)
         self.spec = self.mistdata.spec
         self.t_assumed_L = t_assumed_L
@@ -82,27 +94,41 @@ class MISTCalibration:
         _gamma_a = np.atleast_2d(gamma_a["antenna"])  # (batch, freq)
 
         # apply frequency cut to gamma_a and gamma_r if necessary
-        mask = (all_s11_freq >= self.fmin) & (all_s11_freq <= self.fmax)
-        if _gamma_a.shape[-1] == all_s11_freq.size:  # cuts not applied yet
+        mask = (self.all_s11_freq >= self.fmin) & (
+            self.all_s11_freq <= self.fmax
+        )
+        if (
+            _gamma_a.shape[-1] == self.all_s11_freq.size
+        ):  # cuts not applied yet
             _gamma_a = _gamma_a[:, mask]
-        if gamma_r.shape[-1] == all_s11_freq.size:
+        if gamma_r.shape[-1] == self.all_s11_freq.size:
             gamma_r = gamma_r[mask]
 
-        # fit the s11 parameters to a fourier series
+        # fit the s11 parameters
         self._gamma_a = _gamma_a
-        self.nspec = _gamma_a.shape[0]
-        self.gamma_a = np.empty((self.nspec, self.nfreq), dtype=complex)
-        for i, gamma in enumerate(_gamma_a):
-            popt = fit_fourier(
-                s11_freq, gamma, self.fourier_deg, complex_data=True
-            )
-            self.gamma_a[i] = fourier_series(self.mistdata.spec.freq, *popt)
-
         self._gamma_r = gamma_r
-        popt = fit_fourier(
-            s11_freq, gamma_r, self.fourier_deg, complex_data=True
-        )
-        self.gamma_r = fourier_series(self.mistdata.spec.freq, *popt)
+        self.nspec = _gamma_a.shape[0]
+        self.fit_model = fit_model
+        self.fit_nterms = fit_nterms
+        if not fit_model:
+            self.gamma_a = _gamma_a
+            self.gamma_r = gamma_r
+        elif fit_model == "dpss":
+            raise NotImplementedError("DPSS fitting not implemented yet.")
+        elif fit_model == "fourier":
+            self.gamma_a = np.empty((self.nspec, self.nfreq), dtype=complex)
+            for i, gamma in enumerate(_gamma_a):
+                popt = fit_fourier(
+                    s11_freq, gamma, self.fit_nterms, complex_data=True
+                )
+                self.gamma_a[i] = fourier_series(
+                    self.mistdata.spec.freq, *popt
+                )
+
+            popt = fit_fourier(
+                s11_freq, gamma_r, self.fit_nterms, complex_data=True
+            )
+            self.gamma_r = fourier_series(self.mistdata.spec.freq, *popt)
 
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]
