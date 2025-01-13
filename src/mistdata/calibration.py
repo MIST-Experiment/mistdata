@@ -7,7 +7,6 @@ from functools import cached_property
 import numpy as np
 import pickle
 from .s11 import AntennaS11, ReceiverS11
-from .utils import fourier_series, fit_fourier
 
 
 class MISTCalibration:
