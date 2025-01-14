@@ -6,6 +6,7 @@ from copy import deepcopy
 from functools import cached_property
 import numpy as np
 import pickle
+from .fitting import Fit
 from .s11 import AntennaS11, ReceiverS11
 
 
@@ -21,8 +22,6 @@ class MISTCalibration:
         cal_data,
         t_assumed_L=300,
         t_assumed_LNS=2300,
-        fit_model="dpss",
-        fit_nterms=10,
     ):
         """
         Class holding parameters and methods needed for MIST calibration,
@@ -41,11 +40,6 @@ class MISTCalibration:
         t_assumed_LNS : float
             Assumed temperature of the load + noise source in Kelvin. Default
             is 2300 K.
-        fit_model : str
-            Which model to fit S11 spectra to. Default is 'dpss'. Options are
-            'dpss' and 'fourier'. If None, no fitting is done.
-        fit_nterms : int
-            Number of terms to use in the fit. Default is 10.
 
         Notes
         -----
@@ -65,15 +59,6 @@ class MISTCalibration:
 
         """
         self.mistdata = deepcopy(mistdata)
-        # frequency cut
-        self.all_s11_freq = self.mistdata.dut_recin.s11_freq  # before cut
-        self.all_spec_freq = self.mistdata.spec.freq  # before cut
-        self.mistdata.cut_freq(self.fmin, self.fmax)
-        self.spec = self.mistdata.spec
-        self.t_assumed_L = t_assumed_L
-        self.t_assumed_LNS = t_assumed_LNS
-
-        self.nfreq = self.mistdata.spec.freq.size
 
         # s11 parameters
         try:
@@ -89,56 +74,32 @@ class MISTCalibration:
             gamma_r = ReceiverS11(
                 self.mistdata.dut_lna, pathB_sparams, pathC_sparams
             ).s11
-        s11_freq = self.mistdata.dut_recin.s11_freq
-        _gamma_a = np.atleast_2d(gamma_a["antenna"])  # (batch, freq)
+        gamma_a = np.atleast_2d(gamma_a["antenna"])
 
-        # apply frequency cut to gamma_a and gamma_r if necessary
-        mask = (self.all_s11_freq >= self.fmin) & (
-            self.all_s11_freq <= self.fmax
-        )
-        if (
-            _gamma_a.shape[-1] == self.all_s11_freq.size
-        ):  # cuts not applied yet
-            _gamma_a = _gamma_a[:, mask]
-        if gamma_r.shape[-1] == self.all_s11_freq.size:
-            gamma_r = gamma_r[mask]
-
-        # fit the s11 parameters
-        self._gamma_a = _gamma_a
-        self._gamma_r = gamma_r
-        self.nspec = _gamma_a.shape[0]
-        self.fit_model = fit_model
-        self.fit_nterms = fit_nterms
-        if not fit_model:
-            self.gamma_a = _gamma_a
-            self.gamma_r = gamma_r
-        elif fit_model == "dpss":
-            raise NotImplementedError("DPSS fitting not implemented yet.")
-        elif fit_model == "fourier":
-            self.gamma_a = np.empty((self.nspec, self.nfreq), dtype=complex)
-            for i, gamma in enumerate(_gamma_a):
-                popt = fit_fourier(
-                    s11_freq, gamma, self.fit_nterms, complex_data=True
-                )
-                self.gamma_a[i] = fourier_series(
-                    self.mistdata.spec.freq, *popt
-                )
-
-            popt = fit_fourier(
-                s11_freq, gamma_r, self.fit_nterms, complex_data=True
-            )
-            self.gamma_r = fourier_series(self.mistdata.spec.freq, *popt)
+        self.t_assumed_L = t_assumed_L
+        self.t_assumed_LNS = t_assumed_LNS
 
         # noise wave parameters
         self.nw_params = cal_data["nw_params"]
         self.C_params = cal_data["C_params"]  # corrections to nw parameters
 
-        # there's one VNA measurement per file so we need to broadcast
-        shape = (self.nspec, -1, self.nfreq)
+        # broadcasting: there's one VNA measurement per file, many spectra
+        self.nfiles = self.gamma_a.shape[0]
+        self.nspec = self.mistdata.spec.psd_antenna.shape[0]
+        spec_per_file = self.nspec // self.nfiles
+        shape = (self.nfiles, spec_per_file, self.nfreq)
+        # spectral measurements are now nfiles x nspec_per_file x nfreq
         self.spec.psd_noise_source.shape = shape
         self.spec.psd_ambient.shape = shape
         self.spec.psd_antenna.shape = shape
-        self.gamma_a.shape = shape
+        # raw s11 measurements are now nfiles x 1 x nfreq_s11
+        self._gamma_a = gamma_a[:, np.newaxis, :]
+        self._gamma_r = gamma_r[np.newaxis, np.newaxis, :]
+
+        # fit s11 spectra with self.fit_s11
+        self.fit = {}
+        self.gamma_a = None
+        self.gamma_r = None
 
     def save(self, filename):
         """
@@ -169,6 +130,89 @@ class MISTCalibration:
         """
         with open(filename, "rb") as f:
             return pickle.load(f)
+
+    @property
+    def s11_freq(self):
+        return self.mistdata.dut_recin.s11_freq
+
+    @property
+    def nfreq_s11(self):
+        return self.s11_freq.size
+
+    @property
+    def freq(self):
+        return self.mistdata.spec.freq
+
+    @property
+    def nfreq(self):
+        return self.freq.size
+
+    def fit_s11(self, device, model="dpss", nterms=10):
+        """
+        Fit the S11 parameters of the antenna to a model.
+
+        Parameters
+        ----------
+        device : str
+            Which spectra to fit. Either 'antenna' or 'receiver'.
+        model : str
+            Which model to fit S11 spectra to. Either 'dpss' or 'fourier'.
+        nterms : int
+            Number of terms to use in the fit.
+
+        """
+        if device == "antenna":
+            gamma = self._gamma_a[:, 0, :]  # squeeze axis 1 since it's 1
+        elif device == "receiver":
+            gamma = self._gamma_r[:, 0, :]
+        else:
+            raise ValueError("Device must be 'antenna' or 'receiver'")
+
+        # the spectra are the last axis of gamma
+        mdl = np.empty_like(gamma)
+        fits = []
+        for i in range(gamma.shape[0]):
+            fit = Fit(self.s11_freq, gamma[i], model, nterms, sigma=1)
+            fit.fit()
+            mdl[i] = fit.predict(self.freq)
+            fits.append(fit)
+        self.fit[device] = fits
+
+        if device == "antenna":
+            self.gamma_a = mdl[:, np.newaxis, :]  # add axis 1 back
+        else:
+            self.gamma_r = mdl[:, np.newaxis, :]
+
+    def cut_freq(self, fmin=None, fmax=None):
+        """
+        Restrict the frequency range of the calibration data.
+
+        Parameters
+        ----------
+        fmin : float
+            Minimum frequency in MHz.
+        fmax : float
+            Maximum frequency in MHz.
+
+        """
+        if fmin is None:
+            fmin = np.min((self.freq.min(), self.s11_freq.min()))
+        if fmax is None:
+            fmax = np.max((self.freq.max(), self.s11_freq.max()))
+
+        mask = (self.freq >= fmin) & (self.freq <= fmax)
+        s11_mask = (self.s11_freq >= fmin) & (self.s11_freq <= fmax)
+
+        self._gamma_a = self._gamma_a[:, :, s11_mask]
+        self._gamma_r = self._gamma_r[:, :, s11_mask]
+        if self.gamma_a is not None:
+            self.gamma_a = self.gamma_a[:, :, mask]
+        if self.gamma_r is not None:
+            self.gamma_r = self.gamma_r[:, :, mask]
+
+        self.mistdata.cut_freq(
+            freq_min=self.fmin, freq_max=self.fmax, inplace=True
+        )
 
     @cached_property
     def k_params(self):
