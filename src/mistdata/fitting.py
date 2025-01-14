@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def design_matrix(x, model, nterms):
     """
     Construct the design matrix for the given model.
@@ -36,6 +37,7 @@ def design_matrix(x, model, nterms):
         raise ValueError("model must be 'fourier' or 'dpss'")
     return A
 
+
 def least_squares(A, y, sigma):
     """
     Solve the linear least squares problem.
@@ -67,6 +69,7 @@ def least_squares(A, y, sigma):
     Q, R = np.linalg.qr(np.sqrt(W) @ A, mode="reduced")
     xhat = np.linalg.solve(R, Q.T @ np.sqrt(W) @ y)
     return xhat
+
 
 class Fit:
 
@@ -108,7 +111,6 @@ class Fit:
         self.popt = least_squares(self.A, self.y, self.sigma)
         self.yhat = self.A @ self.popt
         self.residuals = self.y - self.yhat
-
 
     def predict(self, x):
         """

@@ -12,10 +12,6 @@ from .s11 import AntennaS11, ReceiverS11
 
 class MISTCalibration:
 
-    # frequency range to do calibration over
-    fmin = 23
-    fmax = 107
-
     def __init__(
         self,
         mistdata,
@@ -84,14 +80,14 @@ class MISTCalibration:
         self.C_params = cal_data["C_params"]  # corrections to nw parameters
 
         # broadcasting: there's one VNA measurement per file, many spectra
-        self.nfiles = self.gamma_a.shape[0]
+        self.nfiles = gamma_a.shape[0]
         self.nspec = self.mistdata.spec.psd_antenna.shape[0]
         spec_per_file = self.nspec // self.nfiles
         shape = (self.nfiles, spec_per_file, self.nfreq)
         # spectral measurements are now nfiles x nspec_per_file x nfreq
-        self.spec.psd_noise_source.shape = shape
-        self.spec.psd_ambient.shape = shape
-        self.spec.psd_antenna.shape = shape
+        self.mistdata.spec.psd_noise_source.shape = shape
+        self.mistdata.spec.psd_ambient.shape = shape
+        self.mistdata.spec.psd_antenna.shape = shape
         # raw s11 measurements are now nfiles x 1 x nfreq_s11
         self._gamma_a = gamma_a[:, np.newaxis, :]
         self._gamma_r = gamma_r[np.newaxis, np.newaxis, :]
@@ -169,7 +165,7 @@ class MISTCalibration:
             raise ValueError("Device must be 'antenna' or 'receiver'")
 
         # the spectra are the last axis of gamma
-        mdl = np.empty_like(gamma)
+        mdl = np.empty((gamma.shape[0], self.nfreq), dtype=complex)
         fits = []
         for i in range(gamma.shape[0]):
             fit = Fit(self.s11_freq, gamma[i], model, nterms, sigma=1)
@@ -253,7 +249,10 @@ class MISTCalibration:
         float
             Receiver gain.
         """
-        pdiff = self.spec.psd_noise_source - self.spec.psd_ambient
+        pdiff = (
+            self.mistdata.spec.psd_noise_source
+            - self.mistdata.spec.psd_ambient
+        )
         tdiff = self.t_assumed_LNS - self.t_assumed_L
         k0 = self.k_params["k0"]
         C1 = self.C_params["C1"]
@@ -270,7 +269,7 @@ class MISTCalibration:
         float
             Receiver temperature in Kelvin.
         """
-        t1 = self.spec.psd_ambient / self.receiver_gain
+        t1 = self.mistdata.spec.psd_ambient / self.receiver_gain
         t2 = self.k_params["k0"] * (self.t_assumed_L - self.C_params["C2"])
         U = self.k_params["kU"] * self.nw_params["TU"]
         C = self.k_params["kC"] * self.nw_params["TC"]
@@ -283,7 +282,10 @@ class MISTCalibration:
         Calculate the antenna temperature of the antenna, given in
         Equation 5 of the MIST instrument paper (Monsalve et al. 2024).
         """
-        return self.spec.psd_antenna / self.receiver_gain - self.receiver_temp
+        return (
+            self.mistdata.spec.psd_antenna / self.receiver_gain
+            - self.receiver_temp
+        )
 
     # XXX belongs somewhere else, probably in MISTData
     def calc_Tsky(self, Tphys=0, eta_rad=1, eta_beam=1, eta_balun=1):
