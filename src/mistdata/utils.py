@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import List, Union
 import numpy as np
-from scipy.optimize import curve_fit
 import skyfield.api as sf
 
 SF_TS = sf.load.timescale()
