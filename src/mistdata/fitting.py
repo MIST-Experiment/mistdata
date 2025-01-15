@@ -1,20 +1,27 @@
 import numpy as np
+from scipy.signal import windows
 
-
-def design_matrix(x, model, nterms):
+def design_matrix(x, model, nterms, fc=None, fhw=None):
     """
     Construct the design matrix for the given model.
 
     Parameters
     ----------
     x : array-like
-        The x data, normally frequency channels.
+        The x data, normally frequency channels. Must be equally spaced if
+        ``model'' is 'dpss'.
     model : str
-        The model to fit. Must be ``fourier'' or ``dpss''.
+        The model to fit. Must be 'fourier' or 'dpss'.
     nterms : int
         The number of terms in the model. For the Fourier model, this refers
         to the number of cosine terms, meaning the total number of parameters
         will be 2*nterms + 1.
+    fc : float
+        The center of the DPSS window. Only used if ``model'' is
+        'dpss'. Must have inverse units of x.
+    fhw : float
+        The half-width of the DPSS window. Only used if ``model'' is 'dpss'.
+        Must have inverse units of x.
 
     Returns
     -------
@@ -32,7 +39,11 @@ def design_matrix(x, model, nterms):
             A[:, 2 * i + 1] = np.cos(arg)
             A[:, 2 * i + 2] = np.sin(arg)
     elif model == "dpss":
-        raise NotImplementedError("DPSS model not implemented")
+        nf = x.size  # window length
+        bw = x[-1] - x[0]  # full bandwidth
+        xc = x[nf // 2]
+        dpss_vec = windows.dpss(nf, bw * fhw, Kmax=nterms).T  # (nf, nterms)
+        A = dpss_vec * np.exp(2j * np.pi * (x[:, None] - xc) * fc)
     else:
         raise ValueError("model must be 'fourier' or 'dpss'")
     return A
@@ -73,7 +84,7 @@ def least_squares(A, y, sigma):
 
 class Fit:
 
-    def __init__(self, x, y, model, nterms, sigma=1):
+    def __init__(self, x, y, model, nterms, fc=None, fhw=None, sigma=1):
         """
         Fit a model to the given data.
 
@@ -89,6 +100,12 @@ class Fit:
             The number of terms in the model. For the Fourier model, this
             refers to the number of cosine terms, meaning the total number of
             parameters will be 2*nterms + 1.
+        fc : float
+            The center of the DPSS window. Only used if ``model'' is 'dpss'.
+            Must have inverse units of x.
+        fhw : float
+            The half-width of the DPSS window. Only used if ``model'' is
+            'dpss'. Must have inverse units of x.
         sigma : float
             The uncertainty in the y data. Either scalar (constant noise),
             an array-like of the same length as y, or a matrix specifying the
@@ -100,8 +117,9 @@ class Fit:
         self.model = model
         self.nterms = nterms
         self.sigma = sigma
-
-        self.A = design_matrix(x, model, nterms)
+        self.fc = fc
+        self.fhw = fhw
+        self.A = design_matrix(x, model, nterms, fc=fc, fhw=fhw)
 
     def fit(self):
         """
@@ -127,6 +145,6 @@ class Fit:
             The predicted y values.
 
         """
-        A = design_matrix(x, self.model, self.nterms)
+        A = design_matrix(x, self.model, self.nterms, fc=self.fc, fhw=self.fhw)
         y = A @ self.popt
         return y
