@@ -143,7 +143,7 @@ class MISTCalibration:
     def nfreq(self):
         return self.freq.size
 
-    def fit_s11(self, device, model="dpss", nterms=10):
+    def fit_s11(self, device, model="fourier", nterms=50, normalize="christian"):
         """
         Fit the S11 parameters of the antenna to a model.
 
@@ -168,7 +168,14 @@ class MISTCalibration:
         mdl = np.empty((gamma.shape[0], self.nfreq), dtype=complex)
         fits = []
         for i in range(gamma.shape[0]):
-            fit = Fit(self.s11_freq, gamma[i], model, nterms, sigma=1)
+            fit = Fit(
+                self.s11_freq,
+                gamma[i],
+                model,
+                nterms,
+                sigma=1,
+                normalize=normalize,
+            )
             fit.fit()
             mdl[i] = fit.predict(self.freq)
             fits.append(fit)
@@ -206,9 +213,7 @@ class MISTCalibration:
         if self.gamma_r is not None:
             self.gamma_r = self.gamma_r[:, :, mask]
 
-        self.mistdata.cut_freq(
-            freq_min=self.fmin, freq_max=self.fmax, inplace=True
-        )
+        self.mistdata.cut_freq(freq_min=fmin, freq_max=fmax, inplace=True)
 
     @cached_property
     def k_params(self):

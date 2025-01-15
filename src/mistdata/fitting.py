@@ -1,53 +1,6 @@
 import numpy as np
 from scipy.signal import windows
 
-def design_matrix(x, model, nterms, fc=None, fhw=None):
-    """
-    Construct the design matrix for the given model.
-
-    Parameters
-    ----------
-    x : array-like
-        The x data, normally frequency channels. Must be equally spaced if
-        ``model'' is 'dpss'.
-    model : str
-        The model to fit. Must be 'fourier' or 'dpss'.
-    nterms : int
-        The number of terms in the model. For the Fourier model, this refers
-        to the number of cosine terms, meaning the total number of parameters
-        will be 2*nterms + 1.
-    fc : float
-        The center of the DPSS window. Only used if ``model'' is
-        'dpss'. Must have inverse units of x.
-    fhw : float
-        The half-width of the DPSS window. Only used if ``model'' is 'dpss'.
-        Must have inverse units of x.
-
-    Returns
-    -------
-    A : ndarray
-        The design matrix for the given model. Rows correspond to data points
-        and columns correspond to parameters.
-
-    """
-    if model == "fourier":
-        A = np.zeros((x.size, 2 * nterms + 1))
-        A[:, 0] = 1
-        period = np.max(x) - np.min(x)
-        for i in range(nterms):
-            arg = 2 * np.pi * (i + 1) * x / period
-            A[:, 2 * i + 1] = np.cos(arg)
-            A[:, 2 * i + 2] = np.sin(arg)
-    elif model == "dpss":
-        nf = x.size  # window length
-        bw = x[-1] - x[0]  # full bandwidth
-        xc = x[nf // 2]
-        dpss_vec = windows.dpss(nf, bw * fhw, Kmax=nterms).T  # (nf, nterms)
-        A = dpss_vec * np.exp(2j * np.pi * (x[:, None] - xc) * fc)
-    else:
-        raise ValueError("model must be 'fourier' or 'dpss'")
-    return A
-
 
 def least_squares(A, y, sigma):
     """
@@ -84,7 +37,9 @@ def least_squares(A, y, sigma):
 
 class Fit:
 
-    def __init__(self, x, y, model, nterms, fc=None, fhw=None, sigma=1):
+    def __init__(
+        self, x, y, model, nterms, sigma=1, normalize="christian", fc=None, fhw=None
+    ):
         """
         Fit a model to the given data.
 
@@ -100,16 +55,19 @@ class Fit:
             The number of terms in the model. For the Fourier model, this
             refers to the number of cosine terms, meaning the total number of
             parameters will be 2*nterms + 1.
+        sigma : array-like
+            The uncertainty in the y data. Either scalar (constant noise),
+            an array-like of the same length as y, or a matrix specifying the
+            full covariance matrix of the data.
+        normalize : bool
+            Normalize the frequency channels by 2*pi / bandwidth. Only used
+            if ``model'' is 'fourier'.
         fc : float
             The center of the DPSS window. Only used if ``model'' is 'dpss'.
             Must have inverse units of x.
         fhw : float
             The half-width of the DPSS window. Only used if ``model'' is
             'dpss'. Must have inverse units of x.
-        sigma : float
-            The uncertainty in the y data. Either scalar (constant noise),
-            an array-like of the same length as y, or a matrix specifying the
-            full covariance matrix of the data.
 
         """
         self.x = x
@@ -117,9 +75,45 @@ class Fit:
         self.model = model
         self.nterms = nterms
         self.sigma = sigma
+        self.normalize = normalize
         self.fc = fc
         self.fhw = fhw
-        self.A = design_matrix(x, model, nterms, fc=fc, fhw=fhw)
+        self.A = self.design_matrix()
+
+    def design_matrix(self, x=None):
+        """
+        Construct the design matrix. Let x be None for fitting, and provide a
+        new x for prediction.
+        """
+        if x is None:
+            x = self.x
+        else:
+            x = np.copy(x)
+        if self.model == "dpss":
+            return self._design_matrix_dpss(x)
+        if self.normalize == "christian":
+            x = 2 * np.pi * x / (x[-1] - x[0])
+        elif self.normalize == "raul":
+            x = (x - x.max()) / x[x.size // 2]
+        return self._design_matrix_fourier(x=x)
+
+    def _design_matrix_fourier(self, x):
+        A = np.empty((x.size, 2 * self.nterms + 1))
+        A[:, 0] = 1
+        for i in range(self.nterms):
+            arg = (i + 1) * x
+            A[:, 2 * i + 1] = np.cos(arg)
+            A[:, 2 * i + 2] = np.sin(arg)
+        return A
+
+    def _design_matrix_dpss(self, x):
+        nf = x.size
+        bw = x[-1] - x[0]
+        xc = x[nf // 2]
+        arg = 2j * np.pi * (x[:, None] - xc) * self.fc
+        dpss_vec = windows.dpss(nf, bw * self.fhw, Kmax=self.nterms).T
+        A = dpss_vec * np.exp(arg)
+        return A
 
     def fit(self):
         """
@@ -145,6 +139,6 @@ class Fit:
             The predicted y values.
 
         """
-        A = design_matrix(x, self.model, self.nterms, fc=self.fc, fhw=self.fhw)
+        A = self.design_matrix(x)
         y = A @ self.popt
         return y
