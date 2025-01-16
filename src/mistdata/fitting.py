@@ -109,7 +109,11 @@ class Fit:
         bw = x[-1] - x[0]
         xc = x[nf // 2]
         arg = 2j * np.pi * (x[:, None] - xc) * self.fc
+        # each row is a dpss vector
         dpss_vec = windows.dpss(nf, bw * self.fhw, Kmax=self.nterms).T
+        # the dpss vectors are normalized (2-norm) meaning the A matrix will
+        # depend on a factor of sqrt(nf) that we need to account for
+        dpss_vec *= np.sqrt(nf)
         A = dpss_vec * np.exp(arg)
         return A
 
