@@ -35,6 +35,41 @@ def least_squares(A, y, sigma):
     return xhat
 
 
+def get_nterms_DPSS(x, fhw, eval_cutoff):
+    """
+    Find the number of DPSS vectors with eigenvalues above the given
+    cutoff. This uses the estimate provided by Slepian 1978 and
+    Karnik 2020, as implemented by Aaron Ewall-Wice in the hera_filters
+    package.
+
+    Parameters
+    ----------
+    x : array-like
+        The x data, normally frequency channels.
+    fhw : float
+        The half-width of the DPSS window. Must have inverse units of x.
+    eval_cutoff : float
+        Minimum eigenvalue to include in the model.
+
+    Returns
+    -------
+    nterms : int
+        The number of DPSS vectors to include.
+
+    """
+    nf = np.size(x)
+    bw = x[-1] - x[0]
+    # arguments for the log terms
+    a = 4 * nf
+    b = 4 / (eval_cutoff * (1 - eval_cutoff))
+    Nw = 2 * bw * fhw + 2 / np.pi**2 * np.log(a) * np.log(b)
+    Kmax = int(np.min([Nw, nf]))  # this is an upper bound for nterms
+    # we compute the eigenvalues and keep the ones above the cutoff
+    evals = windows.dpss(nf, bw * fhw, Kmax=Kmax, return_ratios=True)[1]
+    nterms = np.max(np.where(evals >= eval_cutoff))
+    return nterms
+
+
 class Fit:
 
     def __init__(self, x, y, nterms, sigma=1):
@@ -135,44 +170,12 @@ class FitDPSS(Fit):
 
         """
         if eval_cutoff is not None:
-            nterms = self.get_nterms(x, eval_cutoff)
+            nterms = get_nterms_DPSS(x, fhw, eval_cutoff)
         if nterms is None:
             raise ValueError("Must provide nterms or eval_cutoff.")
-        super().__init__(x, y, nterms, sigma=sigma)
         self.fc = fc
         self.fhw = fhw
-
-    def get_nterms(self, eval_cutoff):
-        """
-        Find the number of DPSS vectors with eigenvalues above the given
-        cutoff. This uses the estimate provided by Slepian 1978 and
-        Karnik 2020, as implemented by Aaron Ewall-Wice in the hera_filters
-        package.
-
-        Parameters
-        ----------
-        eval_cutoff : float
-            Minimum eigenvalue to include in the model.
-
-        Returns
-        -------
-        nterms : int
-            The number of DPSS vectors to include.
-
-        """
-        nf = self.x.size
-        bw = self.x[-1] - self.x[0]
-        # arguments for the log terms
-        a = 4 * nf
-        b = 4 / (eval_cutoff * (1 - eval_cutoff))
-        Nw = 2 * bw * self.fhw + 2 / np.pi**2 * np.log(a) * np.log(b)
-        Kmax = int(np.min([Nw, nf]))  # this is an upper bound for nterms
-        # we compute the eigenvalues and keep the ones above the cutoff
-        _, evals = windows.dpss(
-            nf, bw * self.fhw, Kmax=Kmax, return_ratios=True
-        )
-        nterms = np.max(np.where(evals >= eval_cutoff))
-        return nterms
+        super().__init__(x, y, nterms, sigma=sigma)
 
     def design_matrix(self, x=None):
         """
