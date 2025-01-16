@@ -37,85 +37,35 @@ def least_squares(A, y, sigma):
 
 class Fit:
 
-    def __init__(
-        self, x, y, model, nterms, sigma=1, normalize=True, fc=0, fhw=0.2
-    ):
+    def __init__(self, x, y, nterms, sigma=1):
         """
-        Fit a model to the given data.
-
-        Parameters
-        ----------
-        x : array-like
-            The x data, normally frequency channels.
-        y : array-like
-            The y data, normally spectra. Must have the same length as x.
-        model : str
-            The model to fit. Must be ``fourier'' or ``dpss''.
-        nterms : int
-            The number of terms in the model. For the Fourier model, this
-            refers to the number of cosine terms, meaning the total number of
-            parameters will be 2*nterms + 1.
-        sigma : array-like
-            The uncertainty in the y data. Either scalar (constant noise),
-            an array-like of the same length as y, or a matrix specifying the
-            full covariance matrix of the data.
-        normalize : bool
-            Normalize the frequency channels by 2*pi / bandwidth. Only used
-            if ``model'' is 'fourier'.
-        fc : float
-            The center of the DPSS window. Only used if ``model'' is 'dpss'.
-            Must have inverse units of x.
-        fhw : float
-            The half-width of the DPSS window. Only used if ``model'' is
-            'dpss'. Must have inverse units of x.
-
+        Base class for fitting a model to the given data. Use the subclasses
+        FitDPSS and FitFourier instead.
         """
         self.x = x
         self.y = y
-        self.model = model
         self.nterms = nterms
         self.sigma = sigma
-        self.normalize = normalize
-        self.fc = fc
-        self.fhw = fhw
         self.A = self.design_matrix()
 
     def design_matrix(self, x=None):
         """
         Construct the design matrix. Let x be None for fitting, and provide a
-        new x for prediction.
+        new x for prediction. This method must be provided by the subclass.
+
+        Parameters
+        ----------
+        x : array-like
+            The x values to construct the design matrix for. If None, use the
+            x values provided during initialization.
+
+        Returns
+        -------
+        A : ndarray
+            The design matrix. Shape is (x.size, nterms).
+
         """
-        if x is None:
-            x = self.x
-        else:
-            x = np.copy(x)
-        if self.model == "dpss":
-            return self._design_matrix_dpss(x)
-        if self.normalize:
-            x = 2 * np.pi * x / (x[-1] - x[0])
-        return self._design_matrix_fourier(x=x)
-
-    def _design_matrix_fourier(self, x):
-        A = np.empty((x.size, 2 * self.nterms + 1))
-        A[:, 0] = 1
-        for i in range(self.nterms):
-            arg = (i + 1) * x
-            A[:, 2 * i + 1] = np.cos(arg)
-            A[:, 2 * i + 2] = np.sin(arg)
-        return A
-
-    def _design_matrix_dpss(self, x):
-        nf = x.size
-        bw = x[-1] - x[0]
-        xc = x[nf // 2]
-        arg = 2j * np.pi * (x[:, None] - xc) * self.fc
-        # each row is a dpss vector
-        dpss_vec = windows.dpss(nf, bw * self.fhw, Kmax=self.nterms).T
-        # the dpss vectors are normalized (2-norm) meaning the A matrix will
-        # depend on a factor of sqrt(nf) that we need to account for
-        dpss_vec *= np.sqrt(nf)
-        A = dpss_vec * np.exp(arg)
-        return A
+        raise NotImplementedError("Subclass must implement design_matrix.")
 
     def fit(self):
         """
@@ -144,3 +94,169 @@ class Fit:
         A = self.design_matrix(x)
         y = A @ self.popt
         return y
+
+
+class FitDPSS(Fit):
+
+    def __init__(
+        self, x, y, nterms=None, eval_cutoff=None, sigma=1, fc=0, fhw=0.2
+    ):
+        """
+        Fit a model to the given data using Discrete Prolate Spheroidal
+        Sequences (DPSS).
+
+        Parameters
+        ----------
+        x : array-like
+            The x data, normally frequency channels.
+        y : array-like
+            The y data, normally spectra. Must have the same length as x.
+        nterms : int
+            The number of DPSS vectors to include in the model. This can
+            be determined automatically by providing eval_cutoff instead.
+        eval_cutoff : float
+            Minimum eigenvalue to include in the model. If provided, nterms
+            will be determined automatically.
+        sigma : array-like
+            The uncertainty in the y data. Either scalar (constant noise),
+            an array-like of the same length as y, or a matrix specifying the
+            full covariance matrix of the data.
+        fc : float
+            The center of the DPSS window. Must have inverse units of x.
+        fhw : float
+            The half-width of the DPSS window.Must have inverse units of x.
+
+        Notes
+        -----
+        A useful way to determine ``fc'' and ``fhw'' is to fourier transform
+        ``y'' and plot the magnitude of this delay spectrum. The center and
+        half-width of the DPSS window should be chosen to capture the peak
+        of the delay spectrum.
+
+        """
+        if eval_cutoff is not None:
+            nterms = self.get_nterms(x, eval_cutoff)
+        if nterms is None:
+            raise ValueError("Must provide nterms or eval_cutoff.")
+        super().__init__(x, y, nterms, sigma=sigma)
+        self.fc = fc
+        self.fhw = fhw
+
+    def get_nterms(self, eval_cutoff):
+        """
+        Find the number of DPSS vectors with eigenvalues above the given
+        cutoff. This uses the estimate provided by Slepian 1978 and
+        Karnik 2020, as implemented by Aaron Ewall-Wice in the hera_filters
+        package.
+
+        Parameters
+        ----------
+        eval_cutoff : float
+            Minimum eigenvalue to include in the model.
+
+        Returns
+        -------
+        nterms : int
+            The number of DPSS vectors to include.
+
+        """
+        nf = self.x.size
+        bw = self.x[-1] - self.x[0]
+        # arguments for the log terms
+        a = 4 * nf
+        b = 4 / (eval_cutoff * (1 - eval_cutoff))
+        Nw = 2 * bw * self.fhw + 2 / np.pi**2 * np.log(a) * np.log(b)
+        Kmax = int(np.min([Nw, nf]))  # this is an upper bound for nterms
+        # we compute the eigenvalues and keep the ones above the cutoff
+        _, evals = windows.dpss(
+            nf, bw * self.fhw, Kmax=Kmax, return_ratios=True
+        )
+        nterms = np.max(np.where(evals >= eval_cutoff))
+        return nterms
+
+    def design_matrix(self, x=None):
+        """
+        Construct the design matrix. Let x be None for fitting, and provide a
+        new x for prediction.
+
+        Parameters
+        ----------
+        x : array-like
+            The x values to construct the design matrix for. If None, use the
+            x values provided during initialization.
+
+        Returns
+        -------
+        A : ndarray
+            The design matrix. Shape is (x.size, nterms).
+
+        """
+        if x is None:
+            x = self.x
+        nf = x.size
+        bw = x[-1] - x[0]
+        xc = x[nf // 2]
+        arg = 2j * np.pi * (x[:, None] - xc) * self.fc
+        # each row is a dpss vector
+        dpss_vec = windows.dpss(nf, bw * self.fhw, Kmax=self.nterms).T
+        # the dpss vectors are normalized (2-norm) meaning the A matrix will
+        # depend on a factor of sqrt(nf) that we need to account for
+        dpss_vec *= np.sqrt(nf)
+        A = dpss_vec * np.exp(arg)
+        return A
+
+
+class FitFourier(Fit):
+
+    def __init__(self, x, y, nterms, sigma=1, normalize=True):
+        """
+        Fit a model to the given data using Fourier series.
+
+        Parameters
+        ----------
+        x : array-like
+            The x data, normally frequency channels.
+        y : array-like
+            The y data, normally spectra. Must have the same length as x.
+        nterms : int
+            The number of cosine terms to include in the model. The total
+            number of parameters will be 2*nterms+1 (constant term and sine
+            and cosine terms).
+        sigma : array-like
+            The uncertainty in the y data. Either scalar (constant noise),
+            an array-like of the same length as y, or a matrix specifying the
+            full covariance matrix of the data.
+        normalize : bool
+            Normalize the frequency channels by 2*pi / bandwidth.
+
+        """
+        super().__init__(x, y, nterms, sigma=sigma)
+        self.normalize = normalize
+
+    def design_matrix(self, x=None):
+        """
+        Construct the design matrix. Let x be None for fitting, and provide a
+        new x for prediction.
+
+        Parameters
+        ----------
+        x : array-like
+            The x values to construct the design matrix for. If None, use the
+            x values provided during initialization.
+
+        Returns
+        -------
+        A : ndarray
+            The design matrix. Shape is (x.size, 2*nterms+1).
+
+        """
+
+        if self.normalize:
+            x = 2 * np.pi * x / (x[-1] - x[0])
+        A = np.empty((x.size, 2 * self.nterms + 1))
+        A[:, 0] = 1
+        for i in range(self.nterms):
+            arg = (i + 1) * x
+            A[:, 2 * i + 1] = np.cos(arg)
+            A[:, 2 * i + 2] = np.sin(arg)
+        return A
