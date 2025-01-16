@@ -6,7 +6,7 @@ from copy import deepcopy
 from functools import cached_property
 import numpy as np
 import pickle
-from .fitting import Fit
+from .fitting import FitDPSS
 from .s11 import AntennaS11, ReceiverS11
 
 
@@ -143,23 +143,19 @@ class MISTCalibration:
     def nfreq(self):
         return self.freq.size
 
-    def fit_s11(
-        self, device, model="dpss", nterms=50, normalize=True, fc=0, fhw=0.2
-    ):
+    def fit_s11(self, device, nterms=None, eval_cutoff=1e-8, fc=0, fhw=0.2):
         """
-        Fit the S11 parameters of the antenna to a model.
+        Fit the S11 parameters of the antenna to a DPSS model.
 
         Parameters
         ----------
         device : str
             Which spectra to fit. Either 'antenna' or 'receiver'.
-        model : str
-            Which model to fit S11 spectra to. Either 'dpss' or 'fourier'.
         nterms : int
-            Number of terms to use in the fit.
-        normalize : bool
-            Normalize frequencies before Fourier series fit. Only used if
-            model is 'fourier'.
+            Number of terms to use in the fit. Needed if eval_cutoff is None.
+        eval_cutoff : float
+            Minimum value of the eigenvalues of the DPSS vectors to keep. This
+            automatically sets the number of terms to use in the fit.
         fc : float
             Filter center for DPSS fit. Only used if model is 'dpss'. Units
             are inverse of frequency units.
@@ -179,13 +175,12 @@ class MISTCalibration:
         mdl = np.empty((gamma.shape[0], self.nfreq), dtype=complex)
         fits = []
         for i in range(gamma.shape[0]):
-            fit = Fit(
+            fit = FitDPSS(
                 self.s11_freq,
                 gamma[i],
-                model,
-                nterms,
+                nterms=nterms,
+                eval_cutoff=eval_cutoff,
                 sigma=1,
-                normalize=normalize,
                 fc=fc,
                 fhw=fhw,
             )
