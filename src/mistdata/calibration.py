@@ -143,7 +143,7 @@ class MISTCalibration:
     def nfreq(self):
         return self.freq.size
 
-    def fit_s11(self, device, model="fourier", nterms=50, normalize="christian"):
+    def fit_s11(self, device, model="dpss", nterms=50, normalize=True, fc=0, fhw=0.2):
         """
         Fit the S11 parameters of the antenna to a model.
 
@@ -155,6 +155,15 @@ class MISTCalibration:
             Which model to fit S11 spectra to. Either 'dpss' or 'fourier'.
         nterms : int
             Number of terms to use in the fit.
+        normalize : bool
+            Normalize frequencies before Fourier series fit. Only used if
+            model is 'fourier'.
+        fc : float
+            Filter center for DPSS fit. Only used if model is 'dpss'. Units
+            are inverse of frequency units.
+        fhw : float
+            Filter half-width for DPSS fit. Only used if model is 'dpss'. Units
+            are inverse of frequency units.
 
         """
         if device == "antenna":
@@ -175,6 +184,8 @@ class MISTCalibration:
                 nterms,
                 sigma=1,
                 normalize=normalize,
+                fc=fc,
+                fhw=fhw,
             )
             fit.fit()
             mdl[i] = fit.predict(self.freq)

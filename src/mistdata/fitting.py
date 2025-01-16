@@ -38,7 +38,7 @@ def least_squares(A, y, sigma):
 class Fit:
 
     def __init__(
-        self, x, y, model, nterms, sigma=1, normalize="christian", fc=None, fhw=None
+        self, x, y, model, nterms, sigma=1, normalize=True, fc=0, fhw=0.2
     ):
         """
         Fit a model to the given data.
@@ -91,10 +91,8 @@ class Fit:
             x = np.copy(x)
         if self.model == "dpss":
             return self._design_matrix_dpss(x)
-        if self.normalize == "christian":
+        if self.normalize:
             x = 2 * np.pi * x / (x[-1] - x[0])
-        elif self.normalize == "raul":
-            x = (x - x.max()) / x[x.size // 2]
         return self._design_matrix_fourier(x=x)
 
     def _design_matrix_fourier(self, x):
