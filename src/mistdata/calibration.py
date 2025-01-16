@@ -143,7 +143,9 @@ class MISTCalibration:
     def nfreq(self):
         return self.freq.size
 
-    def fit_s11(self, device, model="dpss", nterms=50, normalize=True, fc=0, fhw=0.2):
+    def fit_s11(
+        self, device, model="dpss", nterms=50, normalize=True, fc=0, fhw=0.2
+    ):
         """
         Fit the S11 parameters of the antenna to a model.
 
