@@ -5,3 +5,4 @@ calibration/
 batch_plotting/
 pdfs/
 trash/
+**/__pycache__/

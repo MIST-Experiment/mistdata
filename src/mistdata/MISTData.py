@@ -37,7 +37,8 @@ def _assign_or_stack(var, array):
 
 class MISTData:
     """
-    The MISTData class represents the MIST data with information about DUTRecIn, DUTLNA, and Spectrum.
+    The MISTData class represents the MIST data with information about the
+    DUTRecIn, DUTLNA, and Spectrum.
 
     Attributes:
     - dut_recin (DUTRecIn): The DUTRecIn object.
@@ -45,23 +46,29 @@ class MISTData:
     - spec (Spectrum): The Spectrum object.
 
     Methods:
-    - __getitem__(self, item): Returns a new MISTData object with the specified slice of spec.
+    - __getitem__(self, item): Returns a new MISTData object with the specified
+    slice of spec.
     - save(self, saveto: str = "data.mist"): Save the model to an HDF file.
-    - load(cls, path: str): Load a model from a file and return the recovered MISTData object.
-    - from_list(obj_list) -> "MISTData": Returns a new MISTData object by adding all the elements in the obj_list.
-    - read_raw_many(cls, files: List[str], nproc=None): Read raw data from multiple files and return a MISTData object.
-    - read_raw(cls, path: str): Read raw data from a file and return a MISTData object.
-    - __add__(self, other): Adds two MISTData objects and returns a new MISTData object.
+    - load(cls, path: str): Load a model from a file and return the recovered
+    MISTData object.
+    - from_list(obj_list) -> "MISTData": Returns a new MISTData object by
+    adding all the elements in the obj_list.
+    - read_raw_many(cls, files: List[str], nproc=None): Read raw data from
+    multiple files and return a MISTData object.
+    - read_raw(cls, path: str): Read raw data from a file and return a MISTData
+    object.
+    - __add__(self, other): Adds two MISTData objects and returns a new
+    MISTData object.
     - __eq__(self, other): Checks if two MISTData objects are equal.
-    - plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)): Plots the RFI (Radio Frequency Interference) using the
-      MISTData object.
+    - plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)): Plots the RFI
+    (Radio Frequency Interference) using the MISTData object.
     """
 
     def __init__(
-            self,
-            dut_recin: DUTRecIn = DUTRecIn(),
-            dut_lna: DUTLNA = DUTLNA(),
-            spec: Spectrum = Spectrum(),
+        self,
+        dut_recin: DUTRecIn = DUTRecIn(),
+        dut_lna: DUTLNA = DUTLNA(),
+        spec: Spectrum = Spectrum(),
     ):
         self.dut_recin = dut_recin
         self.dut_lna = dut_lna
@@ -71,7 +78,7 @@ class MISTData:
         return MISTData(
             dut_recin=self.dut_recin,
             dut_lna=self.dut_lna,
-            spec=self.spec[item.start:item.stop:item.step],
+            spec=self.spec[item],
         )
 
     def save(self, saveto: str = "data.mist"):
@@ -110,15 +117,14 @@ class MISTData:
             obj = cls(dut_recin=dutrecin, dut_lna=dutlna, spec=spec)
         return obj
 
-
     @classmethod
     def read_raw(cls, file: str | List[str], nproc=1):
         """
         Reads multiple raw data files and returns a list of MISTData objects.
 
         :param file: A path or list of file paths to the raw data files.
-        :param nproc: The number of processes to use for parallel processing. Default is None, which means no parallel
-                      processing.
+        :param nproc: The number of processes to use for parallel processing.
+        Default is None, which means no parallel processing.
         :return: A list of MISTData objects.
 
         Example usage:
@@ -137,18 +143,18 @@ class MISTData:
                             zip(itertools.repeat(MISTData.read_raw), file),
                         ),
                         total=len(file),
-                        desc="Reading data files"
+                        desc="Reading data files",
                     )
                 )
                 return datafiles
-
 
     @classmethod
     def _read_raw(cls, path: str):
         """
         :class: MISTData
 
-        The `read_raw` method reads raw data from a file and constructs an instance of the `MISTData` class.
+        The `read_raw` method reads raw data from a file and constructs an
+        instance of the `MISTData` class.
 
         :param path: The path to the file containing the raw data.
         :return: An instance of the `MISTData` class.
@@ -158,70 +164,89 @@ class MISTData:
             spec_antenna = None
             spec_ambient = None
             spec_noise_source = None
+
+            recin_therm = None
+            lna_therm = None
+
+            s11_cases = {
+                10: "freq",
+                11: "open_",  # open is a reserved keyword
+                12: "short",
+                13: "match",
+                14: "antenna",
+                15: "ambient",
+                16: "noise_source",
+                20: "freq",
+                21: "open_",
+                22: "short",
+                23: "match",
+                24: "lna",
+            }
+            s11 = {"recin": {}, "lna": {}}
+
             try:
                 for line in fin:
                     line = line.decode("utf-8")
                     line = line.strip().split()
-                    line_array = np.array([complex(i.replace("+-", "-")) for i in line])
+                    line_array = np.array(
+                        [complex(i.replace("+-", "-")) for i in line]
+                    )
                     # iteration = int(np.real(line_array[0]))
                     case = int(np.real(line_array[7]))
 
                     if case == 1:
                         time = _extract_time(line_array)
-                        recin_therm = Thermistors(time, *line_array[[8, 9, 10, 13]].real)
-                    elif case == 10:
-                        recin_s11_freq = line_array[8:].real
-                        recin_s11_freq_time = _extract_time(line_array)
-                    elif case == 11:
-                        recin_s11_open = line_array[8:]
-                        recin_s11_open_time = _extract_time(line_array)
-                    elif case == 12:
-                        recin_s11_short = line_array[8:]
-                        recin_s11_short_time = _extract_time(line_array)
-                    elif case == 13:
-                        recin_s11_match = line_array[8:]
-                        recin_s11_match_time = _extract_time(line_array)
-                    elif case == 14:
-                        recin_s11_antenna = line_array[8:]
-                        recin_s11_antenna_time = _extract_time(line_array)
-                    elif case == 15:
-                        recin_s11_ambient = line_array[8:]
-                        recin_s11_ambient_time = _extract_time(line_array)
-                    elif case == 16:
-                        recin_s11_noise_source = line_array[8:]
-                        recin_s11_noise_source_time = _extract_time(line_array)
+                        therm = Thermistors(
+                            time, *line_array[[8, 9, 10, 13]].real
+                        )
+                        recin_therm = _assign_or_stack(recin_therm, therm)
                     elif case == 2:
                         time = _extract_time(line_array)
-                        lna_therm = Thermistors(time, *line_array[8:12].real)
-                    elif case == 20:
-                        lna_s11_freq = line_array[8:].real
-                        lna_s11_freq_time = _extract_time(line_array)
-                    elif case == 21:
-                        lna_s11_open = line_array[8:]
-                        lna_s11_open_time = _extract_time(line_array)
-                    elif case == 22:
-                        lna_s11_short = line_array[8:]
-                        lna_s11_short_time = _extract_time(line_array)
-                    elif case == 23:
-                        lna_s11_match = line_array[8:]
-                        lna_s11_match_time = _extract_time(line_array)
-                    elif case == 24:
-                        lna_s11_lna = line_array[8:]
-                        lna_s11_lna_time = _extract_time(line_array)
+                        therm = Thermistors(time, *line_array[8:12].real)
+                        lna_therm = _assign_or_stack(lna_therm, therm)
+                    elif case in s11_cases:
+                        if 10 <= case <= 16:
+                            s11_dict = s11["recin"]
+                        elif 20 <= case <= 24:
+                            s11_dict = s11["lna"]
+                        key = s11_cases[case]
+                        if key == "freq":
+                            v = line_array[8:].real
+                        else:
+                            v = line_array[8:]
+                        s11_dict[key] = _assign_or_stack(
+                            s11_dict.get(key, None), v
+                        )
+                        if key == "open_":
+                            time_key = "open_time"
+                        else:
+                            time_key = key + "_time"
+                        s11_dict[time_key] = _assign_or_stack(
+                            s11_dict.get(time_key, None),
+                            _extract_time(line_array),
+                        )
                     elif case == 3:
                         spec_therm = _assign_or_stack(spec_therm, line_array)
                     elif case == 30:
                         spec_freq = line_array[8:].real
                         # spec_freq_time = _extract_time(line_array)
                     elif case == 31:
-                        spec_antenna = _assign_or_stack(spec_antenna, line_array)
+                        spec_antenna = _assign_or_stack(
+                            spec_antenna, line_array
+                        )
                     elif case == 32:
-                        spec_ambient = _assign_or_stack(spec_ambient, line_array)
+                        spec_ambient = _assign_or_stack(
+                            spec_ambient, line_array
+                        )
                     elif case == 33:
-                        spec_noise_source = _assign_or_stack(spec_noise_source, line_array)
+                        spec_noise_source = _assign_or_stack(
+                            spec_noise_source, line_array
+                        )
+
             except EOFError:
                 return None
 
+            _has_spec = True
             try:
                 spec_therm_time = [_extract_time(arr) for arr in spec_therm]
                 spec_therm_lna = spec_therm[:, 8].real
@@ -229,62 +254,50 @@ class MISTData:
                 spec_therm_ambient_load = spec_therm[:, 10].real
                 spec_therm_back_end = spec_therm[:, 13].real
                 spec_t_antenna = spec_antenna[:, 8:].real
-                spec_t_antenna_time = [_extract_time(arr) for arr in spec_antenna]
+                spec_t_antenna_time = [
+                    _extract_time(arr) for arr in spec_antenna
+                ]
                 spec_t_ambient = spec_ambient[:, 8:].real
-                spec_t_ambient_time = [_extract_time(arr) for arr in spec_ambient]
+                spec_t_ambient_time = [
+                    _extract_time(arr) for arr in spec_ambient
+                ]
                 spec_t_noise_source = spec_noise_source[:, 8:].real
-                spec_t_noise_source_time = [_extract_time(arr) for arr in spec_noise_source]
+                spec_t_noise_source_time = [
+                    _extract_time(arr) for arr in spec_noise_source
+                ]
             except IndexError:
                 # raise RuntimeError(f"Cannot read_raw file {path}")
                 return None
 
+            except TypeError:  # reading calibration file without spec data
+                _has_spec = False
+
             dut_recin = DUTRecIn(
-                recin_therm,
-                recin_s11_freq,
-                recin_s11_freq_time,
-                recin_s11_open,
-                recin_s11_open_time,
-                recin_s11_short,
-                recin_s11_short_time,
-                recin_s11_match,
-                recin_s11_match_time,
-                recin_s11_antenna,
-                recin_s11_antenna_time,
-                recin_s11_ambient,
-                recin_s11_ambient_time,
-                recin_s11_noise_source,
-                recin_s11_noise_source_time,
+                recin_therm, **{k: v for k, v in s11["recin"].items()}
             )
             dut_lna = DUTLNA(
-                lna_therm,
-                lna_s11_freq,
-                lna_s11_freq_time,
-                lna_s11_open,
-                lna_s11_open_time,
-                lna_s11_short,
-                lna_s11_short_time,
-                lna_s11_match,
-                lna_s11_match_time,
-                lna_s11_lna,
-                lna_s11_lna_time,
+                lna_therm, **{k: v for k, v in s11["lna"].items()}
             )
-            spec_t = Thermistors(
-                spec_therm_time,
-                spec_therm_lna,
-                spec_therm_vna_load,
-                spec_therm_ambient_load,
-                spec_therm_back_end,
-            )
-            spec = Spectrum(
-                spec_t,
-                spec_freq,
-                spec_t_antenna,
-                spec_t_antenna_time,
-                spec_t_ambient,
-                spec_t_ambient_time,
-                spec_t_noise_source,
-                spec_t_noise_source_time,
-            )
+            if _has_spec:
+                spec_t = Thermistors(
+                    spec_therm_time,
+                    spec_therm_lna,
+                    spec_therm_vna_load,
+                    spec_therm_ambient_load,
+                    spec_therm_back_end,
+                )
+                spec = Spectrum(
+                    spec_t,
+                    spec_freq,
+                    spec_t_antenna,
+                    spec_t_antenna_time,
+                    spec_t_ambient,
+                    spec_t_ambient_time,
+                    spec_t_noise_source,
+                    spec_t_noise_source_time,
+                )
+            else:
+                spec = None
         return cls(dut_recin, dut_lna, spec)
 
     def __add__(self, other):
@@ -303,20 +316,44 @@ class MISTData:
 
     def __eq__(self, other):
         if (
-                self.dut_recin == other.dut_recin
-                and self.dut_lna == other.dut_lna
-                and self.spec == other.spec
+            self.dut_recin == other.dut_recin
+            and self.dut_lna == other.dut_lna
+            and self.spec == other.spec
         ):
             return True
         return False
 
+    def cut_freq(self, freq_min=None, freq_max=None, inplace=True):
+        """
+        Cut the frequency range of the Spectrum, DUTRecIn, and DUTLNA
+        objects.
+
+        :param freq_min: The minimum frequency value in MHz.
+        :param freq_max: The maximum frequency value in MHz.
+        :param inplace: If True, the current object is modified. If False, a
+        new object is returned.
+
+        :return: The modified MISTData object if inplace is False.
+        """
+        if inplace:
+            obj = self
+        else:
+            obj = copy.deepcopy(self)
+        obj.spec.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        obj.dut_recin.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        obj.dut_lna.cut_freq(freq_min=freq_min, freq_max=freq_max)
+        if not inplace:
+            return obj
+
     def plot_rfi(self, thresh=5, med_win=10, ax1_lims=(110, 114)):
         """
-        Plots RFI removal steps for MISTData object. Based on https://arxiv.org/abs/2012.06521 paper.
+        Plots RFI removal steps for MISTData object. Based on
+        https://arxiv.org/abs/2012.06521 paper.
 
         :param thresh: The threshold for flagging RFI, default is 5.
         :param med_win: The window size for median filter, default is 10.
-        :param ax1_lims: The limits for the first subplot, default is (110, 114).
+        :param ax1_lims: The limits for the first subplot, default is
+        (110, 114).
 
         :return: The matplotlib Figure object showing the RFI removal steps.
         """

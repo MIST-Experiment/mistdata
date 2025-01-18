@@ -1,14 +1,14 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Union
-
 import numpy as np
 import skyfield.api as sf
 
 SF_TS = sf.load.timescale()
 
+
 def add_sort_time_pair(arr1, time1, arr2, time2):
     """
-    Combines two arrays and corresponding time arrays, sorts them based on time,
+    Combine two arrays and corresponding time arrays, sort them based on time,
     and returns the sorted arrays and time arrays.
     """
     time = combine_times(time1, time2)
@@ -19,9 +19,11 @@ def add_sort_time_pair(arr1, time1, arr2, time2):
 
 def add_sort_spec_pair(spec1, time1, spec2, time2):
     """
-    This method takes in two sets of spectral data and their corresponding observation times, and combines them into
-    a single set of spectral data and observation times. If the observation times of the second set end before the
-    observation times of the first set start, the order of the sets will be swapped before combining.
+    This method takes in two sets of spectral data and their corresponding
+    observation times, and combines them into a single set of spectral data and
+    observation times. If the observation times of the second set end before
+    the observation times of the first set start, the order of the sets will be
+    swapped before combining.
     """
     if time2[-1] < time1[0]:
         time1, time2 = time2, time1
@@ -32,9 +34,11 @@ def add_sort_spec_pair(spec1, time1, spec2, time2):
     # return spec[idxs], [time[i] for i in idxs]
     return spec, time
 
+
 def dtlist2strlist(dates: Union[datetime, List[datetime]]):
     """
-    Converts a list of datetime objects to a list of ISO-formatted string representations.
+    Convert a list of datetime objects to a list of ISO-formatted string
+    representations.
     """
     if not isinstance(dates, List):
         dates = [dates]
@@ -43,7 +47,8 @@ def dtlist2strlist(dates: Union[datetime, List[datetime]]):
 
 def hdfdt2dtlist(dates):
     """
-    Converts an array of dates in string ISO format to a list of datetime objects.
+    Convert an array of dates in string ISO format to a list of datetime
+    objects.
     """
     strdates = [datetime.fromisoformat(dt) for dt in dates.asstr()[()]]
     if len(strdates) == 1:
@@ -84,4 +89,3 @@ def dt2lst(dt: datetime, lon: float):
     t = SF_TS.from_datetime(dt)
     earth_loc = sf.wgs84.latlon(90, lon)
     return earth_loc.lst_hours_at(t)
-
