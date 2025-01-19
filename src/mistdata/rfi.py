@@ -1,6 +1,6 @@
 import datetime
 import numpy as np
-import scipy.signal
+import scipy.ndimage
 from astropy.convolution import convolve
 from .fitting import FitDPSS
 
@@ -42,6 +42,8 @@ def flag_times(spec, tstart=None, tstop=None, inplace=True):
     elif isinstance(tstop, float):
         tstop = datetime.datetime.fromtimestamp(tstop)
     flags = (times >= tstart) & (times <= tstop)
+    # add freq axis for broadcasting
+    flags = np.broadcast_to(flags[:, None], spec.t_antenna.shape)
     if inplace:
         spec.flag_rfi(flags)
     else:
@@ -119,15 +121,13 @@ def median_filter(spec, size=None, footprint=None, limit=100, inplace=True):
 
     Notes
     -----
-    See the documentation for `scipy.signal.median_filter' for details on the
+    See the documentation for `scipy.ndimage.median_filter' for details on the
     `size' and `footprint' parameters.
 
     """
     data = spec.t_antenna
-    df = spec.freq[1] - spec.freq[0]
-    int_time = np.median(np.diff(spec.psd_antenna_time))
-    noise_est = data / np.sqrt(df * int_time)
-    med = scipy.signal.median_filter(data, size=size, footprint=footprint)
+    noise_est = spec.noise_estimate()
+    med = scipy.ndimage.median_filter(data, size=size, footprint=footprint)
     flags = np.abs(data - med) > limit * noise_est
     if inplace:
         spec.flag_rfi(flags)
@@ -167,9 +167,7 @@ def mean_filter(
 
     """
     data = spec.t_antenna
-    df = spec.freq[1] - spec.freq[0]
-    int_time = np.median(np.diff(spec.psd_antenna_time))
-    noise_est = data / np.sqrt(df * int_time)
+    noise_est = spec.noise_estimate()
     mean = convolve(data, kernel)
     flags = np.abs(data - mean) > limit * noise_est
     flags[:, flags.mean(axis=0) > time_thresh] = True
@@ -210,14 +208,19 @@ def dpss_filter(spec, fhw, fc=0, eval_cutoff=1e-9, limit=6, inplace=True):
 
     """
     data = spec.t_antenna
-    fit = FitDPSS(spec.freq, data, eval_cutoff=eval_cutoff, fc=fc, fhw=fhw)
-    fit.fit()
-    df = spec.freq[1] - spec.freq[0]
-    int_time = np.median(np.diff(spec.psd_antenna_time))
+    mdl = np.empty_like(data)
+    res = np.empty_like(data)
+    fit = FitDPSS(spec.freq, data[0], eval_cutoff=eval_cutoff, fc=fc, fhw=fhw) 
+    for i, d in enumerate(data):
+        print(f"Fitting DPSS to {i + 1}/{data.shape[0]}")
+        fit.y = d
+        fit.fit()
+        mdl[i] = fit.yhat
+        res[i] = fit.residuals
     # use smoothed data for noise estimate without RFI
-    noise = data / np.sqrt(df * int_time)
-    noise_est = noise * fit.yhat / data
-    flags = np.abs(fit.residuals) > limit * noise_est
+    noise = spec.noise_estimate()
+    noise_est = noise * mdl / data
+    flags = np.abs(res) > limit * noise_est
     if inplace:
         spec.flag_rfi(flags)
     else:
