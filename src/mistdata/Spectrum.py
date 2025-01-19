@@ -54,7 +54,6 @@ class Spectrum:
         self.psd_noise_source = psd_noise_source
         self.psd_noise_source_time = psd_noise_source_time
         self.lst = None
-        self.t_antenna = None
         if psd_antenna_time is None:
             self.time_start = None
             self.time_end = None
@@ -90,6 +89,29 @@ class Spectrum:
     def time(self):
         return self._psd_antenna_time
 
+    @property
+    def t_antenna(self):
+        return self.calc_temp()
+
+    @property
+    def int_time(self):
+        return np.median(np.diff(self.psd_antenna_time)).total_seconds()
+
+    def noise_estimate(self):
+        """
+        Use the radiometer equation to estimate the noise temperature of the
+        system.
+
+        Returns
+        -------
+        noise : numpy.ndarray
+            The estimated noise temperature of the system.
+
+        """
+        df = self.freq[1] - self.freq[0]
+        noise = self.t_antenna / np.sqrt(df * self.int_time)
+        return noise
+
     def flag_mad(self, limit=5):
         """
         :param limit: The limit for the median absolute deviation (MAD)
@@ -121,7 +143,6 @@ class Spectrum:
 
     def flag_rfi(self, flags):
         self.rfi_flags = np.logical_or(self.rfi_flags, flags)
-        self.t_antenna = ma.masked_array(self.t_antenna, flags)
         self.psd_antenna = ma.masked_array(self.psd_antenna, flags)
 
     def write_self_to_file(self, file: h5py.File):
@@ -212,8 +233,6 @@ class Spectrum:
         self.psd_antenna = self.psd_antenna[..., mask]
         self.psd_ambient = self.psd_ambient[..., mask]
         self.psd_noise_source = self.psd_noise_source[..., mask]
-        if self.t_antenna is not None:
-            self.t_antenna = self.t_antenna[..., mask]
 
     def calc_temp(self):
         """
@@ -224,7 +243,7 @@ class Spectrum:
         :return: None
         """
         # TODO: Fix bigger size of ambient and throw a warning
-        self.t_antenna = (
+        return (
             2000
             * (self.psd_antenna - self.psd_ambient)
             / (self.psd_noise_source - self.psd_ambient)
@@ -269,9 +288,6 @@ class Spectrum:
         )
 
     def plot_temp(self, **kwargs):
-        if self.t_antenna is None:
-            self.calc_temp()
-
         if "vmin" not in kwargs:
             kwargs["vmin"] = 100
         if "vmax" not in kwargs:
