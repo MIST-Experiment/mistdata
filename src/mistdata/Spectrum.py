@@ -12,6 +12,7 @@ from .Thermistors import Thermistors
 from .plotting import plot_spec, plot_spec_rows, plot_spec_stats
 from .utils import add_sort_spec_pair, dt2lst
 from .utils import hdfdt2dtlist, dtlist2strlist, ds2np
+from . import rfi
 
 
 class Spectrum:
@@ -60,6 +61,7 @@ class Spectrum:
         else:
             self.time_start = min(psd_antenna_time)
             self.time_end = max(psd_antenna_time)
+        self.rfi_flags = np.zeros_like(self.psd_antenna, dtype=bool)
 
     def __getitem__(self, item):
         return Spectrum(
@@ -110,12 +112,17 @@ class Spectrum:
         `Spectrum` object in-place.
 
         """
-        data = self.t_antenna
-        mdata = np.median(data, axis=0)
-        absdiff = np.abs(data - mdata)
-        mad = np.median(absdiff, axis=0)
-        flags = absdiff > limit * mad
-        self.t_antenna = ma.masked_array(data, flags)
+        warnings.warn(
+            "Spectrum.flag_mad is deprecated and will be removed in a future"
+            " release. Use methods from rfi.py instead.",
+            DeprecationWarning,
+        )
+        rfi.flag_mad(self, limit=limit, inplace=True)
+
+    def flag_rfi(self, flags):
+        self.rfi_flags = np.logical_or(self.rfi_flags, flags)
+        self.t_antenna = ma.masked_array(self.t_antenna, flags)
+        self.psd_antenna = ma.masked_array(self.psd_antenna, flags)
 
     def write_self_to_file(self, file: h5py.File):
         """
