@@ -1,196 +1,134 @@
 """
-Tools for calculating noise wave parameters needed to calibrate MIST data.
-Notations are following Monsalve et al. 2017 (M17), with some specific
-quantities from Monsalve et al. 2024 (M24).
+Noise-wave calibration of the MIST receiver.
+
+The calibration model is Equations 5-13 of the MIST instrument paper
+(Monsalve et al. 2024, M24), as implemented in MISTCalibration. For a
+calibrator with physical temperature T, it reads
+
+    T = k0 (C1 (T_LNS - T_L) Q + T_L - C2) - kU TU - kC TC - kS TS,
+
+where Q = (P - P_L) / (P_LNS - P_L) is the ratio of the measured PSDs,
+T_L and T_LNS are the assumed temperatures of the internal load and load +
+noise source, and k0, kU, kC, kS depend on the reflection coefficients of
+the calibrator and the receiver.
+
+The model is linear in C1, C2, TU, TC and TS. Modelling each as a
+polynomial in frequency, a single linear least-squares fit to the hot load,
+ambient load, open cable and shorted cable measurements gives all five at
+once. This replaces the iteration between the C parameters and the noise
+wave parameters in Monsalve et al. 2017.
 """
 
-from functools import partial
 import numpy as np
-from scipy.optimize import curve_fit
 
-from mistdata import MISTCalibration
-
-
-def _nw_model(freq, coeffs, open_cal, short_cal):
-    """
-    Model of antenna temperature given noise wave parameters. This is
-    fit to measurements of the open and short cables, using Eq. 7 in M17.
-    Inputs are the polynomial coefficients of the noise wave parameters,
-    in order of decreasing degree (the last element is the constant term).
-
-    Parameters
-    ----------
-    freq : array-like
-        Frequency in Hz, the first M elements are the frequency points of
-        the open cable measurements, and the next N elements are the
-        frequency points of the short cable measurements. In practice, the
-        frequency points of the open and short cables are the same.
-    coeffs : array-like
-        Polynomial coefficients that model the noise wave parameters. This
-        must have a length of 3 times the degree of the polynomial. For
-        a polynomial of degree N, the coefficients are ordered as follows:
-        [Tunc_N, ..., Tunc_0, Tcos_N, ..., Tcos_0, Tsin_N, ..., Tsin_0].
-    open_cal : MISTCalibration
-        Calibration object for the open cable.
-    short_cal : MISTCalibration
-        Calibration object for the short cable.
-
-    Returns
-    -------
-    T_open_short : ndarray
-        Concatenated calibrated temperature spectra of the open and short
-        cables. The first M elements are the calibrated temperature spectrum
-        of the open cable, and the next N elements are the calibrated
-        temperature spectrum of the short cable.
-
-    """
-    Tunc_pars, Tcos_pars, Tsin_pars = np.split(coeffs, 3)
-    Tunc = np.polyval(Tunc_pars, freq)
-    Tcos = np.polyval(Tcos_pars, freq)
-    Tsin = np.polyval(Tsin_pars, freq)
-    open_cal.nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
-    short_cal.nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
-    T_open = open_cal.antenna_temp
-    T_short = short_cal.antenna_temp
-    return np.concatenate((T_open, T_short))
+C_KEYS = ("C1", "C2")
+NW_KEYS = ("TU", "TC", "TS")
 
 
 class NoiseWave:
 
-    # degree of the polynomial model for the noise wave parameters (from M17)
-    nw_poly_deg = 7
-
-    def __init__(
-        self,
-        hot_data,
-        ambient_data,
-        open_data,
-        short_data,
-        pathA_sparams,
-        gamma_r,
-    ):
+    def __init__(self, calibrators, temperatures, npoly=7):
         """
         Parameters
         ----------
-        hot_data : MISTData
-            MISTData object containing the hot load data.
-        ambient_data : MISTData
-            MISTData object containing the ambient load data.
-        open_data : MISTData
-            MISTData object containing the open cable data.
-        short_data : MISTData
-            MISTData object containing the short cable data
-        pathA_sparams : array-like
-            S-parameters of the path A in Figure 19 of M24. This is needed
-            to shift the reference plane of the S11-measurements of the
-            calibrators connected to the receiver input.
-        gamma_r : complex
-            Reflection coefficient looking in to the receiver input.
+        calibrators : dict
+            MISTCalibration object for each calibrator, e.g. with keys
+            'hot', 'ambient', 'open' and 'short'. The S11s must be fit with
+            MISTCalibration.fit_s11 and all calibrators must share the same
+            frequency axis. Their noise wave and C parameters are not used.
+        temperatures : dict
+            Physical temperature in Kelvin of each calibrator, with the same
+            keys as calibrators. Either a float or an array with one value
+            per frequency.
+        npoly : int
+            Number of polynomial terms used to model each of C1, C2, TU, TC
+            and TS in frequency.
 
         """
-        # initialize noise wave parameters with zeros
-        nw_params = {"TU": 0, "TC": 0, "TS": 0}  # Tunc, Tcos, Tsin
-        C_params = {"C1": 0, "C2": 0}  # corrections C1, C2
-        cal_data = {
-            "pathA_sparams": pathA_sparams,
-            "gamma_r": gamma_r,
-            "nw_params": nw_params,
-            "C_params": C_params,
-        }
-        # assumed physical temperature of the calibrators (from M24)
-        t_L = 300  # assumed physical temperature of the load
-        t_LNS = 2300  # assumed noise temperature of load + noise source
+        self.calibrators = calibrators
+        self.temperatures = temperatures
+        self.npoly = npoly
 
-        self.hot_cal = MISTCalibration(
-            hot_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
-        )
-        self.ambient_cal = MISTCalibration(
-            ambient_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
-        )
-        self.open_cal = MISTCalibration(
-            open_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
-        )
-        self.short_cal = MISTCalibration(
-            short_data, cal_data, t_assumed_L=t_L, t_assumed_LNS=t_LNS
-        )
+        self.freq = next(iter(calibrators.values())).freq
+        for name, cal in calibrators.items():
+            if not np.array_equal(cal.freq, self.freq):
+                raise ValueError(
+                    f"Calibrator '{name}' has a different frequency axis."
+                )
 
-        self.freq = open_data.spec.freq
-
-        # physical temperature of the calibrators XXX
-        self.T_hot = 400  # XXX guess
-        self.T_amb = 300  # XXX guess
-        self.T_open = 300  # XXX guess
-        self.T_short = 300  # XXX guess
+        self.coeffs = None
 
     @property
-    def C_params(self):
-        return self.hot_cal.C_params
-
-    @property
-    def nw_params(self):
-        return self.hot_cal.nw_params
-
-    def _update_C(self):
+    def basis(self):
         """
-        Update the C parameters in the calibration data. This uses Eq. 10
-        and Eq. 11 in M17.
-
+        Legendre polynomials evaluated on the frequency axis mapped to
+        [-1, 1]. Shape is (nfreq, npoly).
         """
-        c1 = self.C_params["C1"]
-        c2 = self.C_params["C2"]
-        Th_spec = self.hot_cal.antenna_temp  # T_H^i
-        Ta_spec = self.ambient_cal.antenna_temp  # T_A^i
+        fmin, fmax = self.freq.min(), self.freq.max()
+        x = (2 * self.freq - fmin - fmax) / (fmax - fmin)
+        return np.polynomial.legendre.legvander(x, self.npoly - 1)
 
-        c1_next = c1 * (self.T_hot - self.T_amb) / (Th_spec - Ta_spec)
-        c2_next = c2 + Ta_spec - self.T_amb
-        C_next = {"C1": c1_next, "C2": c2_next}
-
-        self.hot_cal.C_params = C_next
-        self.ambient_cal.C_params = C_next
-        self.open_cal.C_params = C_next
-        self.short_cal.C_params = C_next
-
-    def _update_nw(self):
+    def _design(self, cal, temperature):
         """
-        Use measurements of open and short cables to fit the noise wave
-        parameters. This is a least squares fit to Eq. 7 in M17.
+        Rows of the least-squares problem for one calibrator. There is one
+        block of rows per file, using the time-averaged PSDs of that file.
+
+        Returns
+        -------
+        A : ndarray
+            Design matrix of shape (nfiles * nfreq, 5 * npoly), the columns
+            multiply the polynomial coefficients of C1, C2, TU, TC and TS.
+        b : ndarray
+            Data vector of shape (nfiles * nfreq,).
 
         """
-        mdl = partial(
-            _nw_model, open_cal=self.open_cal, short_cal=self.short_cal
-        )
-        xdata = np.concatenate((self.open_cal.freq, self.short_cal.freq))
-        ydata = np.concatenate(
-            np.full(len(self.open_cal.freq), self.T_open),
-            np.full(len(self.short_cal.freq), self.T_short),
-        )
-        p0 = [0] * self.nw_poly_deg * 3
-        popt = curve_fit(mdl, xdata, ydata, p0=p0)[0]
-        Tunc_pars, Tcos_pars, Tsin_pars = np.split(popt, 3)
-        Tunc = np.polyval(Tunc_pars, self.freq)
-        Tcos = np.polyval(Tcos_pars, self.freq)
-        Tsin = np.polyval(Tsin_pars, self.freq)
-        nw_params = {"TU": Tunc, "TC": Tcos, "TS": Tsin}
+        spec = cal.mistdata.spec
+        # PSDs are (nfiles, nspec_per_file, nfreq), k params (nfiles, 1, nfreq)
+        p_ant = spec.psd_antenna.mean(axis=1)
+        p_load = spec.psd_ambient.mean(axis=1)
+        p_lns = spec.psd_noise_source.mean(axis=1)
+        q = (p_ant - p_load) / (p_lns - p_load)
+        k = {key: cal.k_params[key][:, 0] for key in ("k0", "kU", "kC", "kS")}
+        dT = cal.t_assumed_LNS - cal.t_assumed_L
 
-        self.hot_cal.nw_params = nw_params
-        self.ambient_cal.nw_params = nw_params
-        self.open_cal.nw_params = nw_params
-        self.short_cal.nw_params = nw_params
+        columns = [k["k0"] * dT * q, -k["k0"], -k["kU"], -k["kC"], -k["kS"]]
+        blocks = []
+        for i in range(q.shape[0]):
+            blocks.append(
+                np.hstack([col[i, :, None] * self.basis for col in columns])
+            )
+        A = np.vstack(blocks)
+        T = np.broadcast_to(temperature, q.shape)
+        b = (T - k["k0"] * cal.t_assumed_L).ravel()
+        return A, b
 
-    def iterate(self):
+    def solve(self):
         """
-        Iterate the calibration process until the C parameters converge.
+        Fit C1, C2, TU, TC and TS to the calibrator measurements.
 
         Returns
         -------
         C_params : dict
-            Converged C parameters.
+            C1 and C2 as a function of frequency.
         nw_params : dict
-            Noise wave parameters TU, TC, TS as a function of frequency.
+            Noise wave parameters TU, TC and TS as a function of frequency.
 
         """
-        for i in range(3):
-            self._update_C()
-            self._update_nw()
+        A, b = [], []
+        for name, cal in self.calibrators.items():
+            A_cal, b_cal = self._design(cal, self.temperatures[name])
+            A.append(A_cal)
+            b.append(b_cal)
+        A = np.vstack(A)
+        b = np.concatenate(b)
 
-        return self.C_params, self.nw_params
+        # normalize the columns to improve the conditioning
+        norm = np.linalg.norm(A, axis=0)
+        x = np.linalg.lstsq(A / norm, b, rcond=None)[0] / norm
+
+        keys = C_KEYS + NW_KEYS
+        self.coeffs = dict(zip(keys, x.reshape(len(keys), self.npoly)))
+        params = {key: self.basis @ c for key, c in self.coeffs.items()}
+        C_params = {key: params[key] for key in C_KEYS}
+        nw_params = {key: params[key] for key in NW_KEYS}
+        return C_params, nw_params
