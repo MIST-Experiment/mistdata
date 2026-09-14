@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.interpolate import CubicSpline
 from scipy.signal import windows
 
 
@@ -193,9 +194,17 @@ class FitDPSS(Fit):
         A : ndarray
             The design matrix. Shape is (x.size, nterms).
 
+        Notes
+        -----
+        For a new x, the DPSS vectors of the fit grid are interpolated with a
+        cubic spline. Computing new DPSS vectors on the new grid gives
+        different basis functions, which is badly wrong for the high-order
+        vectors used to fit signals with long delays.
+
         """
-        if x is None:
-            x = self.x
+        if x is not None:
+            return CubicSpline(self.x, self.A)(x)
+        x = self.x
         nf = x.size
         bw = x[-1] - x[0]
         xc = x[nf // 2]
