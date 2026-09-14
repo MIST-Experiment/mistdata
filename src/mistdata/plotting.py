@@ -2,6 +2,7 @@ from typing import Sequence
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 import matplotlib.dates as mdates
 from datetime import datetime
 
@@ -13,6 +14,7 @@ def plot_spec(
     vmin=1e11,
     vmax=3.3e11,
     cmap="plasma",
+    log=False,
     plot_index=False,
     plot_datetime=False,
 ):
@@ -26,6 +28,8 @@ def plot_spec(
     :param vmax: Minimum value for the upper colorbar limit.
     :param cmap: A string specifying the color map for the spectrogram.
         Default value is 'plasma'.
+    :param log: A boolean flag indicating whether to plot the logarithm of the
+        spectrum. Default value is False.
     :param plot_index: A boolean flag indicating whether to plot the index on
         the y-axis.
     :param plot_datetime: A boolean flag indicating whether to plot the
@@ -55,10 +59,13 @@ def plot_spec(
         raise ValueError("Unrecognized y-axis type")
 
     fig = plt.figure(figsize=(8.25, 6))
+    if log:
+        norm = colors.LogNorm(vmin=vmin, vmax=vmax)
+    else:
+        norm = colors.Normalize(vmin=vmin, vmax=vmax)
     plt.imshow(
         spec,
-        vmin=vmin,
-        vmax=vmax,
+        norm=norm,
         aspect="auto",
         interpolation="none",
         cmap=cmap,
