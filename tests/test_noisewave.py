@@ -80,6 +80,28 @@ def assert_true_params(C_params, nw_params):
         assert_allclose(nw_params[key], val, rtol=1e-6, atol=1e-6)
 
 
+def inconsistent_calibrators():
+    """
+    Calibrators generated with the true parameters, but the open cable is
+    reported 5 K warmer than it was, so no parameters close all four.
+    """
+    cals = {}
+    for name in GAMMA:
+        psd = np.tile(true_psd(name), (NSPEC[name], 1))
+        cals[name] = make_cal(GAMMA[name], psd, PLACEHOLDER_NW, PLACEHOLDER_C)
+    temps = {**TEMPS, "open": TEMPS["open"] + 5}
+    return cals, temps
+
+
+def calibrated_minus_physical(cals, temps, C_params, nw_params):
+    """Calibrate each calibrator with MISTCalibration, shape (nfiles, nfreq)."""
+    out = {}
+    for name, cal in cals.items():
+        cal.C_params, cal.nw_params = C_params, nw_params
+        out[name] = cal.antenna_temp.mean(axis=1) - temps[name]
+    return out
+
+
 def test_solve_recovers_true_parameters():
     cals = {}
     for name in GAMMA:
@@ -104,3 +126,30 @@ def test_solve_averages_spectra_over_time():
     C_params, nw_params = NoiseWave(cals, TEMPS).solve()
 
     assert_true_params(C_params, nw_params)
+
+
+def test_sigma_weights_calibrators():
+    cals, temps = inconsistent_calibrators()
+    C_params, nw_params = NoiseWave(cals, temps).solve()
+    unweighted = calibrated_minus_physical(cals, temps, C_params, nw_params)
+
+    sigma = {"hot": 0.01, "ambient": 0.01, "open": 10, "short": 10}
+    C_params, nw_params = NoiseWave(cals, temps).solve(sigma=sigma)
+    weighted = calibrated_minus_physical(cals, temps, C_params, nw_params)
+
+    for name in ("hot", "ambient"):
+        # the inconsistent open cable biases the loads unless down-weighted
+        assert np.abs(unweighted[name]).max() > 0.1
+        assert np.abs(weighted[name]).max() < 1e-3
+
+
+def test_residuals_are_calibrated_minus_physical_temperature():
+    cals, temps = inconsistent_calibrators()
+    nw = NoiseWave(cals, temps)
+    C_params, nw_params = nw.solve()
+
+    expected = calibrated_minus_physical(cals, temps, C_params, nw_params)
+
+    assert np.abs(expected["open"]).max() > 0.1
+    for name in cals:
+        assert_allclose(nw.residuals[name], expected[name], atol=1e-8)

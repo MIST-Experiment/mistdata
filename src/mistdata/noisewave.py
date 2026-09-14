@@ -57,6 +57,9 @@ class NoiseWave:
                 )
 
         self.coeffs = None
+        # calibrated minus physical temperature of each calibrator, set by
+        # solve, shape (nfiles, nfreq)
+        self.residuals = None
 
     @property
     def basis(self):
@@ -102,9 +105,17 @@ class NoiseWave:
         b = (T - k["k0"] * cal.t_assumed_L).ravel()
         return A, b
 
-    def solve(self):
+    def solve(self, sigma=None):
         """
         Fit C1, C2, TU, TC and TS to the calibrator measurements.
+
+        Parameters
+        ----------
+        sigma : dict
+            Uncertainty in Kelvin of the calibrated temperature of each
+            calibrator, used to weight the fit. Either a float or an array
+            with one value per frequency. By default all calibrators have
+            equal weight.
 
         Returns
         -------
@@ -114,17 +125,30 @@ class NoiseWave:
             Noise wave parameters TU, TC and TS as a function of frequency.
 
         """
+        nfreq = self.freq.size
+        designs = {
+            name: self._design(cal, self.temperatures[name])
+            for name, cal in self.calibrators.items()
+        }
         A, b = [], []
-        for name, cal in self.calibrators.items():
-            A_cal, b_cal = self._design(cal, self.temperatures[name])
-            A.append(A_cal)
-            b.append(b_cal)
+        for name, (A_cal, b_cal) in designs.items():
+            s = 1.0 if sigma is None else sigma[name]
+            w = 1 / np.broadcast_to(s, (b_cal.size // nfreq, nfreq)).ravel()
+            A.append(A_cal * w[:, None])
+            b.append(b_cal * w)
         A = np.vstack(A)
         b = np.concatenate(b)
 
         # normalize the columns to improve the conditioning
         norm = np.linalg.norm(A, axis=0)
         x = np.linalg.lstsq(A / norm, b, rcond=None)[0] / norm
+
+        # rows of the design matrix are temperatures, so A x - b is the
+        # calibrated minus the physical temperature
+        self.residuals = {
+            name: (A_cal @ x - b_cal).reshape(-1, nfreq)
+            for name, (A_cal, b_cal) in designs.items()
+        }
 
         keys = C_KEYS + NW_KEYS
         self.coeffs = dict(zip(keys, x.reshape(len(keys), self.npoly)))
