@@ -243,10 +243,10 @@ class MISTCalibration:
 
         _k_params = {}
         _k_params["k0"] = xr / (xa * np.abs(F) ** 2)
-        kU = np.abs(self.gamma_a) ** 2 / xa
-        _k_params["kU"] = kU
-        _k_params["kC"] = kU / np.abs(F) * np.cos(alpha)
-        _k_params["kS"] = kU / np.abs(F) * np.sin(alpha)
+        _k_params["kU"] = np.abs(self.gamma_a) ** 2 / xa  # eq 9
+        kCS = np.abs(self.gamma_a) / (xa * np.abs(F))
+        _k_params["kC"] = kCS * np.cos(alpha)
+        _k_params["kS"] = kCS * np.sin(alpha)
         _k_params["F"] = F
         _k_params["alpha"] = alpha
         return _k_params
