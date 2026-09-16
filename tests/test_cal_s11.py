@@ -147,6 +147,102 @@ def test_calkit():
     assert np.allclose(calkit.match.gamma_ter, gamma_ter_match)
     assert np.allclose(calkit.match.gamma_off, gamma_off)
 
+# Standard definitions for the Keysight/Agilent 85033E 3.5 mm kit (plug).
+#
+# C and L coefficients are from Keysight, the load's offset delay is different
+# following M16 and Monsalve et al. 2024. M16 measured 38.8ps +- 2.1ps.
+# We're using 38ps.
+OPEN_DELAY = 29.243e-12
+OPEN_LOSS = 2.2e9
+OPEN_C_COEFFS = (-0.1597e-45, 23.17e-36, -310.1e-27, 49.43e-15)
+
+SHORT_DELAY = 31.785e-12
+SHORT_LOSS = 2.36e9
+SHORT_L_COEFFS = (-0.01e-42, 2.171e-33, -108.5e-24, 2.077e-12)
+
+MATCH_DELAY = 38e-12  # Keysight nominal is 0 ps
+MATCH_LOSS = 2.3e9
+
+
+def m16_standard_gamma(f_Hz, Z0, delay, delta, Z_ter):
+    """Reflection coefficient of an offset standard, M16 eq. 18.
+
+    ``gamma_l`` below is M16 eq. 21 and ``Z_off`` is eq. 20. Written out
+    independently of ``cal_s11`` so that the test checks the implementation
+    rather than restating it.
+    """
+    Z_off = Z0 + (1 - 1j) * delta / (4 * np.pi * f_Hz) * np.sqrt(f_Hz / 1e9)
+    gamma_off = cal_s11.impedance_to_gamma(Z_off, Z0)
+    gamma_ter = cal_s11.impedance_to_gamma(Z_ter, Z0)
+    gamma_l = 1j * 2 * np.pi * f_Hz * delay + (1 + 1j) * delay * delta / (
+        2 * Z0
+    ) * np.sqrt(f_Hz / 1e9)
+    e = np.exp(-2 * gamma_l)
+    gamma = gamma_off * (1 - e - gamma_off * gamma_ter) + gamma_ter * e
+    gamma /= 1 - gamma_off * (e * gamma_off + gamma_ter * (1 - e))
+    return gamma_off, gamma_ter, gamma
+
+
+def test_keysight_standard_definitions():
+    """The kit carries the published 85033E values.
+
+    Separate from the equation test below, and deliberately tight: a parameter
+    that drifts from the reference must fail here, naming the standard, rather
+    than surfacing as an unexplained mismatch in a reflection coefficient. Two
+    of the three errors this file previously carried -- the short's L1
+    coefficient, off by a factor of 10, and the open's delay, off by 1 fs --
+    moved ``gamma`` by less than ``np.allclose``'s default tolerance and so
+    went unnoticed for the life of the test.
+
+    ``CalStandard`` keeps the parameters only through ``Z_ter`` (the
+    termination, i.e. C, L or R), ``Z_off`` (the offset, i.e. the loss) and
+    ``l_x_gamma`` (delay and loss together), so those are what is checked. The
+    expressions are written out rather than taken from ``cal_s11`` so that this
+    test does not restate the code it is checking.
+
+    Every check is at ``rtol=1e-12`` with ``atol=0``: the constants above are
+    the kit's own values, confirmed parameter by parameter against the EDGES
+    reference implementation, so there is no rounding to leave room for.
+
+    ``atol=0`` matters. ``np.allclose``'s default ``atol`` is 1e-8, which is
+    not scale-free, and the short's ``Z_ter`` is only ~1.6e-3 ohm at 125 MHz,
+    so the default would swamp a relative error of a few parts per million in
+    L -- the same way the default tolerance hid the factor-of-10 L1 error in
+    the first place.
+    """
+    f_Hz = np.arange(1, 126) * 1e6
+    Z_match = 50.025
+    calkit = cal_s11.Keysight85033E(f_Hz, match_resistance=Z_match)
+    Z0 = calkit.Z0
+    rtol = 1e-12
+
+    def same(got, want):
+        # atol=0: see the docstring
+        assert np.allclose(got, want, rtol=rtol, atol=0)
+
+    def Z_off(loss):
+        return Z0 + (1 - 1j) * loss / (4 * np.pi * f_Hz) * np.sqrt(f_Hz / 1e9)
+
+    def l_x_gamma(loss, delay):
+        return 2j * np.pi * f_Hz * delay + (1 + 1j) * delay * loss / (
+            2 * Z0
+        ) * np.sqrt(f_Hz / 1e9)
+
+    C_open = np.polyval(OPEN_C_COEFFS, f_Hz)
+    same(calkit.open.Z_ter, -1j / (2 * np.pi * f_Hz * C_open))
+    same(calkit.open.Z_off, Z_off(OPEN_LOSS))
+    same(calkit.open.l_x_gamma, l_x_gamma(OPEN_LOSS, OPEN_DELAY))
+
+    L_short = np.polyval(SHORT_L_COEFFS, f_Hz)
+    same(calkit.short.Z_ter, 1j * 2 * np.pi * f_Hz * L_short)
+    same(calkit.short.Z_off, Z_off(SHORT_LOSS))
+    same(calkit.short.l_x_gamma, l_x_gamma(SHORT_LOSS, SHORT_DELAY))
+
+    same(calkit.match.Z_ter, Z_match)
+    same(calkit.match.Z_off, Z_off(MATCH_LOSS))
+    same(calkit.match.l_x_gamma, l_x_gamma(MATCH_LOSS, MATCH_DELAY))
+
+
 def test_keysight():
     f_Hz = np.arange(1, 126) * 1e6  # 1 MHz to 125 MHz
     Z_match = 50.025
@@ -154,54 +250,33 @@ def test_keysight():
     assert np.allclose(calkit.Z0, 50)
     Z0 = calkit.Z0
 
-    # values from Monsalve et al 2016 / EDGES memo 12
-    C_open = 4.943e-14 - 3.101e-25 * f_Hz + 2.317e-35 * f_Hz**2 - 1.597e-46 * f_Hz**3
-    L_short = 2.077e-12 - 10.85e-22 * f_Hz + 2.171e-33 * f_Hz**2 - 1.000e-44 * f_Hz**3
+    C_open = np.polyval(OPEN_C_COEFFS, f_Hz)
+    L_short = np.polyval(SHORT_L_COEFFS, f_Hz)
 
     # open
-    delay = 29.242e-12
-    delta = 2.2e9
-    Z_off = Z0 + (1-1j) * delta / (4 * np.pi * f_Hz) * np.sqrt(f_Hz/1e9)
-    gamma_off = cal_s11.impedance_to_gamma(Z_off, Z0)
-    Z_ter = -1j/(2*np.pi*f_Hz*C_open)
-    gamma_ter = cal_s11.impedance_to_gamma(Z_ter, Z0)
-    # eq 21 in Monsalve et al 2016
-    gamma_l = 1j * 2 * np.pi * f_Hz * delay + (1+1j) * delay * delta / (2 * Z0) * np.sqrt(f_Hz/1e9)
-    gamma = gamma_off * (1 - np.exp(-2 * gamma_l) - gamma_off * gamma_ter) + gamma_ter * np.exp(-2 * gamma_l)
-    gamma /= 1 - gamma_off * (np.exp(-2 * gamma_l) * gamma_off + gamma_ter * (1 - np.exp(-2 * gamma_l)))
+    gamma_off, gamma_ter, gamma = m16_standard_gamma(
+        f_Hz, Z0, OPEN_DELAY, OPEN_LOSS, -1j / (2 * np.pi * f_Hz * C_open)
+    )
     assert np.allclose(calkit.open.gamma_ter, gamma_ter)
     assert np.allclose(calkit.open.gamma_off, gamma_off)
     assert np.allclose(calkit.open.gamma, gamma)
 
     # short
-    delay = 31.785e-12
-    delta = 2.36e9
-    Z_off = Z0 + (1-1j) * delta / (4 * np.pi * f_Hz) * np.sqrt(f_Hz/1e9)
-    gamma_off = cal_s11.impedance_to_gamma(Z_off, Z0)
-    Z_ter = 1j*2*np.pi*f_Hz*L_short
-    gamma_ter = cal_s11.impedance_to_gamma(Z_ter, Z0)
-    # eq 21 in Monsalve et al 2016
-    gamma_l = 1j * 2 * np.pi * f_Hz * delay + (1+1j) * delay * delta / (2 * Z0) * np.sqrt(f_Hz/1e9)
-    gamma = gamma_off * (1 - np.exp(-2 * gamma_l) - gamma_off * gamma_ter) + gamma_ter * np.exp(-2 * gamma_l)
-    gamma /= 1 - gamma_off * (np.exp(-2 * gamma_l) * gamma_off + gamma_ter * (1 - np.exp(-2 * gamma_l)))
+    gamma_off, gamma_ter, gamma = m16_standard_gamma(
+        f_Hz, Z0, SHORT_DELAY, SHORT_LOSS, 1j * 2 * np.pi * f_Hz * L_short
+    )
     assert np.allclose(calkit.short.gamma_ter, gamma_ter)
     assert np.allclose(calkit.short.gamma_off, gamma_off)
     assert np.allclose(calkit.short.gamma, gamma)
 
     # match
-    delay = 38.8e-12
-    delta = 2.3e9
-    Z_off = Z0 + (1-1j) * delta / (4 * np.pi * f_Hz) * np.sqrt(f_Hz/1e9)
-    gamma_off = cal_s11.impedance_to_gamma(Z_off, Z0)
-    Z_ter = Z_match
-    gamma_ter = cal_s11.impedance_to_gamma(Z_ter, Z0)
-    # eq 21 in Monsalve et al 2016
-    gamma_l = 1j * 2 * np.pi * f_Hz * delay + (1+1j) * delay * delta / (2 * Z0) * np.sqrt(f_Hz/1e9)
-    gamma = gamma_off * (1 - np.exp(-2 * gamma_l) - gamma_off * gamma_ter) + gamma_ter * np.exp(-2 * gamma_l)
-    gamma /= 1 - gamma_off * (np.exp(-2 * gamma_l) * gamma_off + gamma_ter * (1 - np.exp(-2 * gamma_l)))
+    gamma_off, gamma_ter, gamma = m16_standard_gamma(
+        f_Hz, Z0, MATCH_DELAY, MATCH_LOSS, Z_match
+    )
     assert np.allclose(calkit.match.gamma_ter, gamma_ter)
     assert np.allclose(calkit.match.gamma_off, gamma_off)
     assert np.allclose(calkit.match.gamma, gamma)
+
 
 def test_network_sparams():
     Nfreq = 125
