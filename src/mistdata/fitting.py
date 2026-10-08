@@ -23,6 +23,17 @@ def least_squares(A, y, sigma):
     xhat : ndarray
         The least squares solution.
 
+    Notes
+    -----
+    ``A`` and ``y`` may be complex. With W^{1/2} A = QR (reduced QR), the
+    solution is x = R^{-1} Q^H W^{1/2} y, where Q^H is the conjugate
+    transpose of Q.
+
+    A 2-d ``sigma`` is inverted and ``np.sqrt`` is applied to the result
+    elementwise, which is the square root of the weights only when
+    ``sigma`` is diagonal. Pass a scalar or a per-sample ``sigma``; a
+    non-diagonal covariance matrix is not handled correctly.
+
     """
     if np.isscalar(sigma):
         W = np.eye(y.size) / sigma**2
@@ -32,7 +43,7 @@ def least_squares(A, y, sigma):
         W = np.linalg.inv(sigma)
 
     Q, R = np.linalg.qr(np.sqrt(W) @ A, mode="reduced")
-    xhat = np.linalg.solve(R, Q.T @ np.sqrt(W) @ y)
+    xhat = np.linalg.solve(R, Q.conj().T @ np.sqrt(W) @ y)
     return xhat
 
 
@@ -159,6 +170,9 @@ class FitDPSS(Fit):
             full covariance matrix of the data.
         fc : float
             The center of the DPSS window. Must have inverse units of x.
+            The DPSS basis is multiplied by exp(+2 pi i (x - xc) fc), with
+            xc = x[x.size // 2], so a reflection proportional to
+            exp(-2 pi i x tau) is centred by fc = -tau.
         fhw : float
             The half-width of the DPSS window.Must have inverse units of x.
 
