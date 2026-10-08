@@ -6,14 +6,13 @@ authors = ["Vadym Bidula <vadym.bidula@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"
-numpy = "^1.20"
-matplotlib = "^3.5.1"
+numpy = ">=1.20,<3"
+matplotlib = ">=3.8,<4"
 scipy = "^1.11.1"
 tqdm = "^4.64.0"
-h5py = "^3.8.0"
-astropy = "^5.2.2"
+h5py = ">=3.11"
 skyfield = "^1.46"
-pytz = "^2023.3"
+pytz = ">=2023.3"
 
 [tool.poetry.dev-dependencies]
 jupyter = "^1.0.0"
