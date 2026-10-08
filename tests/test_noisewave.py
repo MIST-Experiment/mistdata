@@ -153,3 +153,20 @@ def test_residuals_are_calibrated_minus_physical_temperature():
     assert np.abs(expected["open"]).max() > 0.1
     for name in cals:
         assert_allclose(nw.residuals[name], expected[name], atol=1e-8)
+
+
+def test_calibration_init_no_deprecation():
+    """
+    MISTCalibration reshapes the PSDs to (nfiles, nspec_per_file, nfreq)
+    without assigning ``.shape``, which numpy 2.5 deprecates. Fails on
+    numpy >= 2.5 before the fix; passes on numpy < 2.5 either way.
+    """
+    import warnings
+
+    gamma_a = np.tile(GAMMA["hot"], (2, 1))  # two files
+    psd = np.ones((8, FREQ.size))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        cal = make_cal(gamma_a, psd, TRUE_NW, TRUE_C)
+    for name in ("psd_antenna", "psd_ambient", "psd_noise_source"):
+        assert getattr(cal.mistdata.spec, name).shape == (2, 4, FREQ.size)

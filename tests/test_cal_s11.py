@@ -296,3 +296,72 @@ def test_network_sparams():
     assert np.all(sparams[1] == 1)
     assert np.all(sparams[2] == 0)
     
+
+def test_network_sparams_recovers_network():
+    """
+    network_sparams recovers a random, well-conditioned network from three
+    standards near open/short/match, for any number of frequencies and for
+    stacked sweeps. Fails on numpy 2 before the port: np.linalg.solve no
+    longer reads a (F, 3) right-hand side as a stack of vectors.
+    """
+    from numpy.testing import assert_allclose
+
+    rng = np.random.default_rng(20261007)
+
+    def embed(s11, s12s21, s22, gamma):  # M16 eq. 1, written out
+        return s11 + s12s21 * gamma / (1 - s22 * gamma)
+
+    def cplx(scale, shape):
+        return (
+            scale
+            * rng.uniform(size=shape)
+            * np.exp(2j * np.pi * rng.uniform(size=shape))
+        )
+
+    for shape in [(1,), (3,), (125,), (4, 125)]:
+        freq = np.linspace(1, 125, shape[-1])
+        s11, s22 = cplx(0.1, shape), cplx(0.1, shape)
+        s21 = 0.9 * np.exp(-2j * np.pi * freq * 10e-3) * np.ones(shape)
+        s12s21 = s21**2  # reciprocal
+        ideal = np.array([1, -1, 0]).reshape((3,) + (1,) * len(shape))
+        gamma_true = ideal + cplx(0.05, (3,) + shape)
+        gamma_meas = embed(s11, s12s21, s22, gamma_true)
+        # rows [1, G_i, G_i G'_i] of each frequency's 3 x 3 system (eq. 3)
+        rows = [np.ones_like(gamma_true), gamma_true, gamma_true * gamma_meas]
+        mat = np.moveaxis(np.stack(rows, axis=-1), 0, -2)
+        assert np.all(np.linalg.cond(mat) < 1e3)
+        got = cal_s11.network_sparams(gamma_true, gamma_meas)
+        want = np.squeeze(np.array([s11, s12s21, s22]))
+        assert got.shape == want.shape
+        assert_allclose(got, want, rtol=0, atol=1e-12)
+
+
+def test_impedance_to_gamma_scalar_and_0d():
+    """
+    Infinite impedance gives Gamma = 1 for scalar, 0-d and array input, with
+    numpy 1.x return types. Fails on numpy >= 2.5 before the port (np.where
+    on a 0-d array raises).
+    """
+    from numpy.testing import assert_allclose, assert_array_equal
+
+    # return types as on numpy 1.x: a numpy scalar for a Python scalar, a
+    # (1,) ndarray for a 0-d array, the dtype following the input
+    g = cal_s11.impedance_to_gamma(np.inf, 50)
+    assert g == 1 and np.ndim(g) == 0
+    assert isinstance(g, np.float64)
+    gc = cal_s11.impedance_to_gamma(25 + 10j, 50)
+    assert isinstance(gc, np.complex128)
+    g0 = cal_s11.impedance_to_gamma(np.array(np.inf), 50)
+    assert_array_equal(g0, [1.0])
+    assert isinstance(g0, np.ndarray) and g0.shape == (1,)
+    assert g0.dtype == np.float64
+    Z = np.array([25 + 10j, complex(0, -np.inf), 75.0, 1e3 - 40j])
+    with np.errstate(invalid="ignore"):
+        got = cal_s11.impedance_to_gamma(Z, 50)
+    assert isinstance(got, np.ndarray) and got.shape == Z.shape
+    assert got.dtype == np.complex128
+    finite = np.isfinite(Z)
+    assert got[~finite] == 1
+    assert_allclose(
+        got[finite], (Z[finite] - 50) / (Z[finite] + 50), rtol=1e-15, atol=0
+    )
