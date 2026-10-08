@@ -85,9 +85,10 @@ class MISTCalibration:
         spec_per_file = self.nspec // self.nfiles
         shape = (self.nfiles, spec_per_file, self.nfreq)
         # spectral measurements are now nfiles x nspec_per_file x nfreq
-        self.mistdata.spec.psd_noise_source.shape = shape
-        self.mistdata.spec.psd_ambient.shape = shape
-        self.mistdata.spec.psd_antenna.shape = shape
+        spec = self.mistdata.spec
+        spec.psd_noise_source = spec.psd_noise_source.reshape(shape)
+        spec.psd_ambient = spec.psd_ambient.reshape(shape)
+        spec.psd_antenna = spec.psd_antenna.reshape(shape)
         # raw s11 measurements are now nfiles x 1 x nfreq_s11
         self._gamma_a = gamma_a[:, np.newaxis, :]
         self._gamma_r = gamma_r[np.newaxis, np.newaxis, :]

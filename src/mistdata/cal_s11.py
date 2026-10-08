@@ -27,7 +27,7 @@ def impedance_to_gamma(Z, Z0):
 
     """
     gamma = np.atleast_1d((Z - Z0) / (Z + Z0))
-    gamma[np.where(np.isinf(Z))] = 1
+    gamma[np.atleast_1d(np.isinf(Z)).nonzero()] = 1
     if np.isscalar(Z):
         return gamma[0]
     return gamma
@@ -118,8 +118,10 @@ def network_sparams(gamma_true, gamma_meas):
     mat = np.dstack(
         ((np.ones_like(gamma_true), gamma_true, gamma_true * gamma_meas))
     )
-    # solve: mat is `a' (shape ..., 3, 3), gamma_meas is `b' (shape ..., 3)
-    sparams = np.linalg.solve(mat, gamma_meas)  # (..., 3)
+    # solve: mat is `a' (shape ..., 3, 3), gamma_meas[..., None] is `b'
+    # (shape ..., 3, 1), an explicit stack of column vectors (numpy 2
+    # reads a (..., 3) `b' as a matrix unless it is 1-d)
+    sparams = np.linalg.solve(mat, gamma_meas[..., None])[..., 0]
     sparams = np.reshape(sparams.T, _orig_shape)  # (3, ...)
     sparams[1] += sparams[0] * sparams[2]  # need to do this to get S12 * S21
     return np.squeeze(sparams)
