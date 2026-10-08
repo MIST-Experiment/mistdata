@@ -18,6 +18,98 @@ def cable_like(freq):
     )
 
 
+def _prolate_count(nf, nw, cutoff):
+    """Eigenvalues >= cutoff of the prolate matrix (Slepian 1978)."""
+    W = nw / nf
+    m = np.arange(nf)
+    d = m[:, None] - m[None, :]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        B = np.sin(2 * np.pi * W * d) / (np.pi * d)
+    B[d == 0] = 2 * W
+    return int(np.count_nonzero(np.linalg.eigvalsh(B) >= cutoff))
+
+
+def test_nterms_counts_eigenvalues_at_or_above_cutoff():
+    """
+    get_nterms_DPSS returns the number of DPSS vectors whose eigenvalue is
+    >= the cutoff. Before the fix it returned the index of the last one,
+    one fewer (7, 10, 14 here).
+    """
+    from scipy.signal import windows
+
+    from mistdata.fitting import get_nterms_DPSS
+
+    x = np.arange(64.0)
+    fhw = 4 / 63
+    nw = (x[-1] - x[0]) * fhw  # NW = 4, as get_nterms_DPSS computes it
+    evals = windows.dpss(64, nw, Kmax=64, return_ratios=True)[1]
+    for cutoff, want in [(0.5, 8), (1e-3, 11), (1e-8, 15)]:
+        n = get_nterms_DPSS(x, fhw, cutoff)
+        assert n == want == np.count_nonzero(evals >= cutoff)
+        assert evals[n - 1] >= cutoff > evals[n]
+
+
+def test_nterms_vna_grid():
+    """
+    Term counts on the MIST VNA grid (497 points, 1-125 MHz) for four
+    (eval_cutoff, fhw) pairs, cross-checked against the eigenvalues of the
+    prolate matrix. At cutoff 1e-14 the boundary eigenvalues (2.8e-14,
+    3.6e-15) are near the eigvalsh floor (~1e-15), so that case allows
+    +-1 and the others are exact.
+    """
+    from mistdata.fitting import get_nterms_DPSS
+
+    x = np.linspace(1, 125, 497)
+    bw = x[-1] - x[0]
+    cases = [
+        (1e-14, 0.4, 118, 1),
+        (1e-12, 0.4, 116, 0),
+        (1e-6, 0.6, 158, 0),
+        (1e-10, 0.1, 36, 0),
+    ]
+    for cutoff, fhw, want, tol in cases:
+        assert abs(get_nterms_DPSS(x, fhw, cutoff) - want) <= tol
+        assert abs(_prolate_count(x.size, bw * fhw, cutoff) - want) <= tol
+
+
+def test_fitdpss_eval_cutoff_uses_all_qualifying_vectors():
+    x = S11_FREQ
+    fit = FitDPSS(x, cable_like(x), eval_cutoff=1e-6, fhw=0.6)
+    assert fit.nterms == 158 and fit.A.shape == (x.size, 158)
+
+
+def test_nterms_raises_when_none_qualify():
+    import pytest
+    from scipy.signal import windows
+
+    from mistdata.fitting import get_nterms_DPSS
+
+    lam0 = windows.dpss(64, 0.5, Kmax=1, return_ratios=True)[1][0]
+    assert lam0 < 0.99
+    with pytest.raises(ValueError):
+        get_nterms_DPSS(np.arange(64.0), 0.5 / 63, 0.99)
+
+
+def test_extra_term_adds_projection_on_added_vector():
+    """
+    The DPSS columns are orthonormal, so one more term leaves the first N
+    coefficients unchanged and adds (u_N . y) u_N to the model.
+    """
+    from scipy.signal import windows
+
+    x = np.linspace(1, 125, 497)
+    rng = np.random.default_rng(5)
+    y = rng.normal(size=x.size) + 1j * rng.normal(size=x.size)
+    n, fhw = 117, 0.4
+    small = FitDPSS(x, y, nterms=n, fhw=fhw)
+    big = FitDPSS(x, y, nterms=n + 1, fhw=fhw)
+    small.fit()
+    big.fit()
+    u = windows.dpss(x.size, (x[-1] - x[0]) * fhw, Kmax=n + 1)[n]
+    assert_allclose(big.popt[:n], small.popt, rtol=0, atol=1e-13)
+    assert_allclose(big.yhat - small.yhat, (u @ y) * u, rtol=0, atol=1e-13)
+
+
 def test_dpss_predict_between_fit_points():
     # channels of the spectrometer grid that lie inside the S11 grid
     spec_freq = np.arange(4096) * 125 / 4096
