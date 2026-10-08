@@ -49,10 +49,11 @@ def least_squares(A, y, sigma):
 
 def get_nterms_DPSS(x, fhw, eval_cutoff):
     """
-    Find the number of DPSS vectors with eigenvalues above the given
-    cutoff. This uses the estimate provided by Slepian 1978 and
-    Karnik 2020, as implemented by Aaron Ewall-Wice in the hera_filters
-    package.
+    Return the number of DPSS vectors whose eigenvalue (concentration
+    ratio) is at or above ``eval_cutoff`` (inclusive). The eigenvalues are
+    only computed up to the estimate of Slepian 1978 and Karnik 2020 for
+    the number of eigenvalues above the cutoff, as implemented by Aaron
+    Ewall-Wice in the hera_filters package.
 
     Parameters
     ----------
@@ -68,6 +69,16 @@ def get_nterms_DPSS(x, fhw, eval_cutoff):
     nterms : int
         The number of DPSS vectors to include.
 
+    Raises
+    ------
+    ValueError
+        If no eigenvalue is at or above ``eval_cutoff``.
+
+    Notes
+    -----
+    Before this fix the function returned one fewer (the index of the last
+    such vector).
+
     """
     nf = np.size(x)
     bw = x[-1] - x[0]
@@ -78,7 +89,12 @@ def get_nterms_DPSS(x, fhw, eval_cutoff):
     Kmax = int(np.min([Nw, nf]))  # this is an upper bound for nterms
     # we compute the eigenvalues and keep the ones above the cutoff
     evals = windows.dpss(nf, bw * fhw, Kmax=Kmax, return_ratios=True)[1]
-    nterms = np.max(np.where(evals >= eval_cutoff))
+    nterms = int(np.count_nonzero(evals >= eval_cutoff))
+    if nterms == 0:
+        raise ValueError(
+            f"No DPSS eigenvalue is >= eval_cutoff = {eval_cutoff} "
+            f"(largest is {evals[0]:.3g})."
+        )
     return nterms
 
 
