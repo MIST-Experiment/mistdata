@@ -143,12 +143,18 @@ class ReceiverS11(S11):
 
         Parameters
         ----------
-        data : mistdata.MISTData.DUTrecIn
+        data : mistdata.DUTLNA.DUTLNA
+            The LNA-side VNA sweep: the internal open, short and match
+            standards and the LNA.
         pathB_sparams : array-like
-            S-parameters of the path B in the receiver. See Fig 19 in the MIST
-            instrument paper, Monsalve et al. 2024.
+            S-parameters of the path B in the receiver, [S11, S12 * S21,
+            S22], with port 1 at the internal reference plane and port 2 at
+            the PSD output. See Fig 19 in the MIST instrument paper,
+            Monsalve et al. 2024.
         pathC_sparams : array-like
-            S-parameters of the path C in the receiver.
+            S-parameters of the path C in the receiver, [S11, S12 * S21,
+            S22], with port 1 at the receiver input and port 2 at the PSD
+            output.
 
         """
         super().__init__(data)
@@ -172,20 +178,22 @@ class ReceiverS11(S11):
     def s11(self):
         """
         Return S11 data calibrated with the calibration kit and with the
-        reference plane at the receiver input. The second step involves
-        de-embedding the S-parameters of internal paths in the receiver (see
-        Fig 19 in the MIST instrument paper, Monsalve et al. 2024).
+        reference plane at the receiver input. After the calibration at the
+        internal reference plane, the S-parameters of path B are de-embedded
+        (moving the reference plane to the PSD output) and those of path C
+        are embedded (moving it to the receiver input); see Fig 19 and the
+        section on reflection coefficient calibration in the MIST
+        instrument paper, Monsalve et al. 2024.
 
         Returns
         -------
         calibrated_s11 : ndarray
-            The calibrated S11 data.
+            The calibrated S11 data, with the shape of ``data.s11_lna``.
 
         """
-        calibrated_s11 = {}
         # de-embed S-parameters of path B in the receiver and embed the
         # S-parameters of path C in the receiver
-        gamma = self.cal_s11_internal["lna"]
+        gamma = self.cal_s11_internal
         calibrated_s11 = de_embed_sparams(self.pathB_sparams, gamma)
         calibrated_s11 = embed_sparams(self.pathC_sparams, calibrated_s11)
 
