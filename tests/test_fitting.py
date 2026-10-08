@@ -29,3 +29,50 @@ def test_dpss_predict_between_fit_points():
     fit.fit()
 
     assert_allclose(fit.predict(x_new), cable_like(x_new), rtol=0, atol=1e-5)
+
+
+def test_fitdpss_recovers_coefficients_off_zero_centre():
+    """
+    At fc != 0 the design matrix is complex; least squares must use Q^H.
+    The sign convention: the basis carries exp(+2 pi i (x - xc) fc).
+    """
+    x = np.linspace(1, 125, 497)
+    rng = np.random.default_rng(3)
+    a_true = rng.normal(size=40) + 1j * rng.normal(size=40)
+    for fc in (0.05, -0.05):
+        ref = FitDPSS(x, np.zeros(x.size, complex), nterms=40, fc=fc, fhw=0.2)
+        y = ref.A @ a_true
+        fit = FitDPSS(x, y, nterms=40, fc=fc, fhw=0.2)
+        fit.fit()
+        assert_allclose(fit.popt, a_true, rtol=0, atol=1e-10)
+        assert np.sqrt(np.mean(np.abs(fit.residuals) ** 2)) < 1e-10
+
+
+def test_least_squares_matches_lstsq_complex():
+    from mistdata.fitting import least_squares
+
+    rng = np.random.default_rng(4)
+    A = rng.normal(size=(60, 12)) + 1j * rng.normal(size=(60, 12))
+    y = rng.normal(size=60) + 1j * rng.normal(size=60)
+    for sigma in (0.3, rng.uniform(0.5, 2, size=60)):
+        w = np.ones(60) / sigma
+        want = np.linalg.lstsq(w[:, None] * A, w * y, rcond=None)[0]
+        assert_allclose(least_squares(A, y, sigma), want, rtol=1e-12)
+
+
+def test_fitdpss_fc_sign_convention():
+    """
+    A reflection exp(-2 pi i x tau) (a delay tau > 0) is centred by
+    fc = -tau: the basis carries exp(+2 pi i (x - xc) fc). The tone is fit
+    to the noise floor at fc = -tau and not at all at fc = +tau.
+    """
+    x = np.linspace(1, 125, 497)
+    tau = 0.1
+    y = np.exp(-2j * np.pi * x * tau)
+    rms = {}
+    for fc in (-tau, tau):
+        fit = FitDPSS(x, y, nterms=20, fc=fc, fhw=0.05)
+        fit.fit()
+        rms[fc] = np.sqrt(np.mean(np.abs(fit.residuals) ** 2))
+    assert rms[-tau] < 1e-3
+    assert rms[tau] > 0.5
