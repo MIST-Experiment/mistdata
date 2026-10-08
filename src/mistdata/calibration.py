@@ -89,9 +89,10 @@ class MISTCalibration:
         spec.psd_noise_source = spec.psd_noise_source.reshape(shape)
         spec.psd_ambient = spec.psd_ambient.reshape(shape)
         spec.psd_antenna = spec.psd_antenna.reshape(shape)
-        # raw s11 measurements are now nfiles x 1 x nfreq_s11
+        # raw s11 measurements are now nfiles x 1 x nfreq_s11 (gamma_r too if
+        # it has one row per file, else 1 x 1 x nfreq_s11)
         self._gamma_a = gamma_a[:, np.newaxis, :]
-        self._gamma_r = gamma_r[np.newaxis, np.newaxis, :]
+        self._gamma_r = np.atleast_2d(gamma_r)[:, np.newaxis, :]
 
         # fit s11 spectra with self.fit_s11
         self.fit = {}
