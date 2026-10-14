@@ -104,8 +104,8 @@ def network_sparams(gamma_true, gamma_meas):
     Returns
     -------
     sparams : ndarray
-        S-parameters in the form [S11, S12 * S21, S22]. We only care about
-        the product of S12 and S21, not their individual values.
+        S-parameters in the form [S11, S12 * S21, S22], C-ordered. We only
+        care about the product of S12 and S21, not their individual values.
 
     """
     gamma_true = np.array(gamma_true, dtype=complex)
@@ -122,7 +122,10 @@ def network_sparams(gamma_true, gamma_meas):
     # (shape ..., 3, 1), an explicit stack of column vectors (numpy 2
     # reads a (..., 3) `b' as a matrix unless it is 1-d)
     sparams = np.linalg.solve(mat, gamma_meas[..., None])[..., 0]
-    sparams = np.reshape(sparams.T, _orig_shape)  # (3, ...)
+    # C-ordered copy: rows of the transpose have a 48 B stride, and numpy
+    # 1.26 then picks its complex-multiply loop (SIMD or scalar, 1 ulp
+    # apart) from the heap addresses, so results would not repeat
+    sparams = np.ascontiguousarray(np.reshape(sparams.T, _orig_shape))
     sparams[1] += sparams[0] * sparams[2]  # need to do this to get S12 * S21
     return np.squeeze(sparams)
 
