@@ -336,6 +336,60 @@ def test_network_sparams_recovers_network():
         assert_allclose(got, want, rtol=0, atol=1e-12)
 
 
+
+def _osl_sweeps(rng, shape):
+    """Model and measured open, short and match on a (3, *shape) grid."""
+
+    def cplx(*shape):
+        return rng.normal(size=shape) + 1j * rng.normal(size=shape)
+
+    gamma_meas = np.array([1, -1, 0]).reshape((3,) + (1,) * len(shape))
+    gamma_meas = gamma_meas + 0.1 * cplx(3, *shape)
+    gamma_true = np.empty_like(gamma_meas)
+    gamma_true[0], gamma_true[1], gamma_true[2] = 1, -1, 0
+    return gamma_true, gamma_meas
+
+
+def test_network_sparams_c_ordered():
+    """
+    The returned S-parameters are C-ordered, so each of S11, S12 S21 and
+    S22 is a contiguous row. Fails before the fix: the rows were views of
+    the solve's transposed (n, 3) result, with a 48 B stride.
+    """
+    rng = np.random.default_rng(20261014)
+    for shape in [(497,), (4, 125)]:
+        sparams = cal_s11.network_sparams(*_osl_sweeps(rng, shape))
+        assert sparams.flags["C_CONTIGUOUS"]
+        for row in sparams:
+            assert row.flags["C_CONTIGUOUS"]
+
+
+def test_network_sparams_bitwise_repeatable():
+    """
+    Repeated calls on the same input agree bitwise, wherever the heap puts
+    their arrays. Fails often before the fix on numpy 1.26: its complex
+    multiply takes the SIMD (FMA) or the scalar loop depending on the
+    operands' addresses, and its overlap check over-estimates a strided
+    row's extent by 32 B, into where glibc puts the next block. The two
+    loops differ by 1 ulp in about 40 % of products (S12 S21 here). The
+    heap is churned between calls so a placement dependence would show.
+    numpy 2 does not show it, so there the test passes either way.
+    """
+    rng = np.random.default_rng(20261015)
+    for shape in [(497,), (4, 125)]:
+        gamma_true, gamma_meas = _osl_sweeps(rng, shape)
+        ref = cal_s11.network_sparams(gamma_true, gamma_meas)
+        keep = []
+        for _ in range(300):
+            # allocate and free odd-sized blocks so the next arrays move
+            for _ in range(int(rng.integers(1, 20))):
+                keep.append(np.empty(int(rng.integers(1, 30000)), np.uint8))
+            if len(keep) > 200:
+                del keep[: int(rng.integers(1, 100))]
+            got = cal_s11.network_sparams(gamma_true, gamma_meas)
+            assert np.array_equal(got, ref)
+
+
 def test_impedance_to_gamma_scalar_and_0d():
     """
     Infinite impedance gives Gamma = 1 for scalar, 0-d and array input, with
