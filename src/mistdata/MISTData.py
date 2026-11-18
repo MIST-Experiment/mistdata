@@ -19,6 +19,9 @@ from .DUTRecIn import DUTRecIn
 from .Spectrum import Spectrum
 
 
+FREQ_AXIS_CONVENTION = "daq"
+
+
 def par_func(pars):
     return pars[0](*pars[1:])
 
@@ -53,10 +56,8 @@ class MISTData:
     MISTData object.
     - from_list(obj_list) -> "MISTData": Returns a new MISTData object by
     adding all the elements in the obj_list.
-    - read_raw_many(cls, files: List[str], nproc=None): Read raw data from
-    multiple files and return a MISTData object.
-    - read_raw(cls, path: str): Read raw data from a file and return a MISTData
-    object.
+    - read_raw(cls, file, nproc=1, *, relabel_freq=False): Read one or more
+    raw data files.
     - __add__(self, other): Adds two MISTData objects and returns a new
     MISTData object.
     - __eq__(self, other): Checks if two MISTData objects are equal.
@@ -118,29 +119,41 @@ class MISTData:
         return obj
 
     @classmethod
-    def read_raw(cls, file: str | List[str], nproc=1):
+    def read_raw(
+        cls,
+        file: str | List[str],
+        nproc=1,
+        *,
+        relabel_freq=FREQ_AXIS_CONVENTION == "true",
+    ):
         """
-        Reads multiple raw data files and returns a list of MISTData objects.
+        Read one or more raw data files.
+
+        The Koheron ``psd_counter`` bug shifted the recorded frequency
+        labels one channel low in the 2024 MISTIC data. Use
+        ``relabel_freq=True`` for those raw files. For other datasets,
+        verify that the recorded labels are one channel low before
+        enabling the correction.
 
         :param file: A path or list of file paths to the raw data files.
         :param nproc: The number of processes to use for parallel processing.
-        Default is None, which means no parallel processing.
-        :return: A list of MISTData objects.
-
-        Example usage:
-
-        files = ['data1.mist', 'data2.mist', 'data3.mist']
-        data = MISTData.read_raw_many(files, nproc=2)
+        :param relabel_freq: Add one channel (125/4096 MHz) to the
+            spectrometer labels. The default keeps the recorded labels.
+        :return: A MISTData object for a single path, or a list for many.
         """
         if isinstance(file, str):
-            return cls._read_raw(file)
+            return cls._read_raw(file, relabel_freq)
         else:
             with Pool(processes=nproc) as pool:
                 datafiles = list(
                     tqdm(
                         pool.imap(
                             par_func,
-                            zip(itertools.repeat(MISTData.read_raw), file),
+                            zip(
+                                itertools.repeat(cls._read_raw),
+                                file,
+                                itertools.repeat(relabel_freq),
+                            ),
                         ),
                         total=len(file),
                         desc="Reading data files",
@@ -149,7 +162,7 @@ class MISTData:
                 return datafiles
 
     @classmethod
-    def _read_raw(cls, path: str):
+    def _read_raw(cls, path: str, relabel_freq=False):
         """
         :class: MISTData
 
@@ -157,6 +170,7 @@ class MISTData:
         instance of the `MISTData` class.
 
         :param path: The path to the file containing the raw data.
+        :param relabel_freq: Whether to relabel the spectrometer frequencies.
         :return: An instance of the `MISTData` class.
         """
         with gz.open(path, "r") as fin:
@@ -279,6 +293,13 @@ class MISTData:
                 lna_therm, **{k: v for k, v in s11["lna"].items()}
             )
             if _has_spec:
+                if relabel_freq:
+                    if 125 in spec_freq:
+                        raise ValueError(
+                            "Cannot relabel a spectrometer axis containing "
+                            "125 MHz"
+                        )
+                    spec_freq = spec_freq + 125 / 4096
                 spec_t = Thermistors(
                     spec_therm_time,
                     spec_therm_lna,
@@ -295,6 +316,7 @@ class MISTData:
                     spec_t_ambient_time,
                     spec_t_noise_source,
                     spec_t_noise_source_time,
+                    freq_axis="true" if relabel_freq else "daq",
                 )
             else:
                 spec = None

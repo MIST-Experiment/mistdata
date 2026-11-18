@@ -21,6 +21,8 @@ class Spectrum:
         therm (Thermistors): Thermistors object representing the thermometers
         used in the measurement.
         freq (numpy.ndarray): The frequency values.
+        freq_axis (str or None): "daq" for recorded labels, "true" for
+        relabelled frequencies, or None for an unmarked spectrum.
         psd_antenna (numpy.ndarray): The PSD antenna values.
         _psd_antenna_time (numpy.ndarray): The PSD antenna time values.
         psd_ambient (numpy.ndarray): The PSD ambient values.
@@ -43,9 +45,12 @@ class Spectrum:
         psd_ambient_time=None,
         psd_noise_source=None,
         psd_noise_source_time=None,
+        *,
+        freq_axis=None,
     ):
         self.therm = therm
         self.freq = freq
+        self.freq_axis = freq_axis
         self.psd_antenna = psd_antenna
         self._psd_antenna_time = psd_antenna_time
         self.psd_ambient = psd_ambient
@@ -71,6 +76,7 @@ class Spectrum:
             psd_ambient_time=self.psd_ambient_time[item],
             psd_noise_source=self.psd_noise_source[item],
             psd_noise_source_time=self.psd_noise_source_time[item],
+            freq_axis=getattr(self, "freq_axis", None),
         )
 
     @property
@@ -124,6 +130,9 @@ class Spectrum:
         """
         grp = file.create_group("spec")
 
+        freq_axis = getattr(self, "freq_axis", None)
+        if freq_axis is not None:
+            grp.attrs["freq_axis"] = freq_axis
         grp.create_dataset("freq", data=self.freq)
         grp.create_dataset("psd_antenna", data=self.psd_antenna)
         grp.create_dataset("psd_ambient", data=self.psd_ambient)
@@ -153,6 +162,7 @@ class Spectrum:
         """
         obj = cls()
         grp = file["spec"]
+        obj.freq_axis = grp.attrs.get("freq_axis")
         obj.freq = ds2np(grp.get("freq"))
         obj.psd_antenna = ds2np(grp.get("psd_antenna"))
         obj.psd_ambient = ds2np(grp.get("psd_ambient"))
@@ -288,6 +298,19 @@ class Spectrum:
             raise ValueError(
                 "Addition defined only for objects of the same class"
             )
+        left_axis = getattr(self, "freq_axis", None)
+        right_axis = getattr(other, "freq_axis", None)
+        if (
+            left_axis is not None
+            and right_axis is not None
+            and left_axis != right_axis
+        ):
+            raise ValueError(
+                "Spectrum frequency axis conventions do not match"
+            )
+        freq_axis = left_axis or right_axis
+        if freq_axis is not None and not np.array_equal(self.freq, other.freq):
+            raise ValueError("Spectrum frequencies do not match")
         # TODO: add derivative values
         return Spectrum(
             self.therm + other.therm,
@@ -310,6 +333,7 @@ class Spectrum:
                 other.psd_noise_source,
                 other.psd_noise_source_time,
             ),
+            freq_axis=freq_axis,
         )
 
     def __radd__(self, other):
