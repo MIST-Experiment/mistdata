@@ -112,7 +112,7 @@ class MISTCalibration:
             pickle.dump(self, f)
 
     @classmethod
-    def load(cls, filename):
+    def load(cls, filename, *, relabel_freq=False):
         """
         Load a calibration object from a pickle file.
 
@@ -120,6 +120,20 @@ class MISTCalibration:
         ----------
         filename : str
             Name of the file to load the calibration object from.
+        relabel_freq : bool
+            Put the spectrometer axis on the true frequencies, as
+            ``MISTData.read_raw(relabel_freq=True)`` does for raw files:
+            add one channel (125/4096 MHz) to the recorded labels. Use it
+            for calibrations of the 2024 MISTIC data, whose labels are one
+            channel low (Koheron ``psd_counter`` bug). An object already on
+            the true axis is returned unchanged. Objects pickled before
+            mistdata marked the axis carry no ``freq_axis`` and hold the
+            recorded labels. The S11 models evaluated on the spectrometer
+            axis (``gamma_a``, ``gamma_r`` and the cached ``k_params``)
+            were evaluated at the old labels, so they are dropped; the VNA
+            data and the fits in ``fit`` are kept. Call ``fit_s11`` or
+            assign ``gamma_a`` and ``gamma_r`` before calibrating. The
+            default keeps the object as pickled.
 
         Returns
         -------
@@ -127,7 +141,31 @@ class MISTCalibration:
             Loaded calibration object.
         """
         with open(filename, "rb") as f:
-            return pickle.load(f)
+            cal = pickle.load(f)
+        if relabel_freq:
+            cal._relabel_freq()
+        return cal
+
+    def _relabel_freq(self):
+        """Move the spectrometer axis from the DAQ labels to true frequencies.
+
+        See ``load``. A no-op on an object already on the true axis.
+        """
+        spec = self.mistdata.spec
+        freq_axis = getattr(spec, "freq_axis", None)
+        if freq_axis == "true":
+            return
+        if freq_axis not in (None, "daq"):
+            raise ValueError(f"Unknown frequency axis {freq_axis!r}")
+        if 125 in spec.freq:
+            raise ValueError(
+                "Cannot relabel a spectrometer axis containing 125 MHz"
+            )
+        spec.freq = spec.freq + 125 / 4096
+        spec.freq_axis = "true"
+        self.gamma_a = None
+        self.gamma_r = None
+        self.__dict__.pop("k_params", None)
 
     @property
     def s11_freq(self):

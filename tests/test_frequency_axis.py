@@ -126,3 +126,71 @@ def test_read_raw_refuses_a_second_shift(raw_path):
     write_raw(raw_path, DAQ_FREQ + CHANNEL_WIDTH_MHZ)
     with pytest.raises(ValueError, match="125 MHz"):
         MISTData.read_raw(raw_path, relabel_freq=True)
+
+
+def make_pickled_cal(path, data):
+    """Pickle a MISTCalibration holding ``data`` and PSD-grid S11 models."""
+    from mistdata.calibration import MISTCalibration
+
+    cal = object.__new__(MISTCalibration)
+    cal.mistdata = data
+    cal._gamma_a = np.full((1, 1, len(VNA_FREQ)), 0.1 + 0.2j)
+    cal._gamma_r = np.full((1, 1, len(VNA_FREQ)), 0.01 + 0.0j)
+    cal.fit = {"antenna": "kept"}
+    cal.gamma_a = np.full((1, 1, 4096), 0.1 + 0.2j)
+    cal.gamma_r = np.full((1, 1, 4096), 0.01 + 0.0j)
+    cal.__dict__["k_params"] = {"k0": 1.0}
+    cal.save(path)
+    return path
+
+
+def test_load_calibration_keeps_labels_by_default(raw_path, tmp_path):
+    from mistdata.calibration import MISTCalibration
+
+    data = MISTData.read_raw(raw_path)
+    path = make_pickled_cal(tmp_path / "cal.pkl", data)
+    cal = MISTCalibration.load(path)
+    assert cal.mistdata.spec.freq_axis == "daq"
+    np.testing.assert_array_equal(cal.freq, DAQ_FREQ)
+    assert cal.gamma_a is not None and "k_params" in cal.__dict__
+
+
+@pytest.mark.parametrize("marked", [True, False])
+def test_load_calibration_relabels_like_read_raw(raw_path, tmp_path, marked):
+    from mistdata.calibration import MISTCalibration
+
+    data = MISTData.read_raw(raw_path)
+    if not marked:  # pickled before mistdata marked the axis
+        del data.spec.freq_axis
+    path = make_pickled_cal(tmp_path / "cal.pkl", data)
+    cal = MISTCalibration.load(path, relabel_freq=True)
+    true = MISTData.read_raw(raw_path, relabel_freq=True).spec
+    assert cal.mistdata.spec.freq_axis == "true"
+    np.testing.assert_array_equal(cal.freq, true.freq)
+    # S11 models evaluated at the old labels are dropped ...
+    assert cal.gamma_a is None and cal.gamma_r is None
+    assert "k_params" not in cal.__dict__
+    # ... the VNA-grid data and the fits are kept
+    np.testing.assert_array_equal(cal._gamma_a, 0.1 + 0.2j)
+    assert cal.fit == {"antenna": "kept"}
+
+
+def test_load_calibration_does_not_relabel_twice(raw_path, tmp_path):
+    from mistdata.calibration import MISTCalibration
+
+    data = MISTData.read_raw(raw_path, relabel_freq=True)
+    path = make_pickled_cal(tmp_path / "cal.pkl", data)
+    cal = MISTCalibration.load(path, relabel_freq=True)
+    np.testing.assert_array_equal(cal.freq, DAQ_FREQ + CHANNEL_WIDTH_MHZ)
+    assert cal.gamma_a is not None and "k_params" in cal.__dict__
+
+
+def test_load_calibration_refuses_axis_with_125_mhz(raw_path, tmp_path):
+    from mistdata.calibration import MISTCalibration
+
+    data = MISTData.read_raw(raw_path)
+    data.spec.freq = DAQ_FREQ + CHANNEL_WIDTH_MHZ
+    data.spec.freq_axis = None
+    path = make_pickled_cal(tmp_path / "cal.pkl", data)
+    with pytest.raises(ValueError, match="125 MHz"):
+        MISTCalibration.load(path, relabel_freq=True)
